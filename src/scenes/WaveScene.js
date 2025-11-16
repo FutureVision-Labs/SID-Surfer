@@ -1,0 +1,1511 @@
+import Phaser from 'phaser'
+
+const COLORS = ['#5af0e0', '#7f5af0', '#ff6b6b', '#ffe66d', '#50fa7b']
+const POWERUP_TYPES = ['shield', 'rockets', 'heal']
+const POWERUP_CONFIG = {
+  shield: { label: 'Shield Boost', duration: 12000 },
+  rockets: { label: 'Rockets', duration: 9000 },
+  heal: { label: 'Health Surge', duration: 0, heal: 25 },
+}
+const WAVE_SCROLL_SPEED = 0.05
+const PLAYER_SPEED = 0.22
+const PLAYER_BOUNCE_AMPLITUDE = 20
+const OBJECT_BOUNCE_AMPLITUDE = 24
+const PLAYER_LERP = 0.15
+const PLAYER_FIRE_DELAY = 350
+const ROCKET_FIRE_DELAY_MULTIPLIER = 0.8
+
+export class WaveScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'WaveScene' })
+    this.waveDefs = []
+    this.playlist = []
+    this.composerName = ''
+    this.currentLane = 0
+    this.laneLabels = []
+    this.placeholderPool = []
+    this.playerSprite = null
+    this.spawnTimer = null
+    this.comboText = null
+    this.comboValue = 0
+    this.playerX = 0
+    this.playerBouncePhase = 0
+    this.waveScroll = 0
+    this.cachedFreqBuckets = []
+    this.currentAnalyserLevel = 0
+    this.playerHealth = 100
+    this.playerMaxHealth = 100
+    this.playerScore = 0
+    this.activePowerup = null
+    this.powerupExpiresAt = 0
+    this.playerProjectiles = []
+    this.enemyProjectiles = []
+    this.lastPlayerShot = 0
+    this.levelIntroLabel = null
+    this.trackAnnouncementLabel = null
+    this.bossActive = false
+    this.bossSprite = null
+    this.bossGlow = null
+    this.bossHealth = 0
+    this.bossMaxHealth = 500
+    this.bossLane = 0
+    this.bossX = 0
+    this.bossFireCooldown = 0
+    this.bossDroneCooldown = 0
+    this.bossProjectiles = []
+    this.bossDrones = []
+    this.explosions = []
+    this.handleWavePlaylist = this.handleWavePlaylist.bind(this)
+    this.handleLevelIntro = this.handleLevelIntro.bind(this)
+    this.handleTrackAnnouncement = this.handleTrackAnnouncement.bind(this)
+  }
+
+  init(data) {
+    this.waveDefs = data.waveDefs ?? this.createDefaultWaves()
+  }
+
+  preload() {
+    this.load.image('powerup-heal', '/sprites/cbmcombo.png')
+    this.load.image('powerup-rockets', '/sprites/rocket.png')
+    this.load.image('powerup-shield', '/sprites/waveform.png')
+    this.load.image('drone', '/sprites/drone.png')
+  }
+
+  create() {
+    const { width, height } = this.scale
+
+    const hud = document.querySelector('.hud')
+    if (hud) {
+      hud.style.display = ''
+    }
+
+    this.background = this.add.graphics()
+    this.drawBackground(width, height)
+
+    this.waveGraphics = this.add.graphics()
+
+    this.player = window.sidSurfer?.sidPlayer ?? null
+
+    this.playerSprite = this.add
+      .triangle(width * 0.8, height * 0.2, -18, 20, 18, 20, 0, -20, 0xfff6c2, 1)
+      .setStrokeStyle(2, 0xfff6c2, 0.9)
+    this.playerGlow = this.add.circle(width * 0.8, height * 0.2, 28, 0xfff6c2, 0.15)
+    this.playerX = width * 0.75
+    this.playerProjectiles = []
+    this.enemyProjectiles = []
+    this.playerHealth = this.playerMaxHealth
+    this.activePowerup = null
+    this.powerupExpiresAt = 0
+    this.lastPlayerShot = 0
+    this.trickMeter = 0
+    this.trickThreshold = 100
+    this.powerupLabel = null
+    this.trickCuePool = [
+      'trick1',
+      'trick2',
+      'trick3',
+      'trickRadical',
+      'trickAwesomesauce',
+      'trickAmazeballs',
+      'trickBoogie',
+      'trickYeah',
+    ]
+    this.trickAnimations = ['spin', 'flip', 'twist', 'barrel']
+
+    this.comboText = this.add
+      .text(width - 32, 32, 'Combo x1', {
+        fontFamily: 'monospace',
+        fontSize: '18px',
+        color: '#ffe66d',
+      })
+      .setOrigin(1, 0)
+
+    this.cursors = this.input.keyboard.createCursorKeys()
+    this.altKeys = this.input.keyboard.addKeys({
+      up: Phaser.Input.Keyboard.KeyCodes.W,
+      down: Phaser.Input.Keyboard.KeyCodes.S,
+      left: Phaser.Input.Keyboard.KeyCodes.A,
+      right: Phaser.Input.Keyboard.KeyCodes.D,
+    })
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+    this.ctrlKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.CONTROL)
+
+    this.game.events.on('wave:playlist', this.handleWavePlaylist)
+    this.game.events.on('wave:level', this.handleLevelIntro)
+    this.game.events.on('wave:track', this.handleTrackAnnouncement)
+    this.game.events.on('wave:boss-fight-start', this.startBossFight.bind(this))
+    this.events.on('composer-profile-complete', () => {
+      const initialState = window.sidSurfer?.waveState
+      if (initialState?.playlist?.length) {
+        this.handleWavePlaylist(initialState)
+      }
+    })
+    const initialState = window.sidSurfer?.waveState
+    if (initialState?.playlist?.length && !this.game.scene.isActive('ComposerProfileScene') && !this.game.scene.isActive('TitleScene')) {
+      this.handleWavePlaylist(initialState)
+    }
+
+    this.spawnInitialPlaceholders()
+    this.spawnTimer = this.time.addEvent({
+      delay: 2200,
+      loop: true,
+      callback: () => this.spawnPlaceholder(),
+    })
+    this.syncHudStatus()
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.game.events.off('wave:playlist', this.handleWavePlaylist)
+      this.game.events.off('wave:level', this.handleLevelIntro)
+      this.game.events.off('wave:track', this.handleTrackAnnouncement)
+      this.game.events.off('wave:boss-fight-start', this.startBossFight)
+      this.spawnTimer?.destroy()
+    })
+  }
+
+  handleWavePlaylist(state) {
+    if (!state) return
+    this.playlist = state.playlist ?? []
+    this.composerName = state.composerName ?? 'Wave Mix'
+    const desiredCount = this.playlist.length || 5
+    this.waveDefs = this.createWaveSet(desiredCount)
+    this.currentLane = 0
+    this.updateLaneMarker()
+    // Lane labels removed
+    this.waveDefs.forEach((wave) => {
+      wave.phase = Math.random() * Math.PI * 2
+      wave.turbulencePhase = Math.random() * Math.PI * 2
+      wave.visualLevel = 0
+      wave.cachedPoints = []
+    })
+  }
+
+  update(time, delta) {
+    this.pollInput()
+    const { width, height } = this.scale
+    this.waveScroll = (this.waveScroll - delta * WAVE_SCROLL_SPEED + width) % width
+    const freqBucketsRaw = this.player?.getFrequencyBuckets?.(96)
+    if (freqBucketsRaw?.length) {
+      this.cachedFreqBuckets = freqBucketsRaw
+      this.currentAnalyserLevel =
+        freqBucketsRaw.reduce((sum, value) => sum + value, 0) / (freqBucketsRaw.length || 1)
+    }
+    const freqBuckets = this.cachedFreqBuckets ?? []
+    const analyserLevel = this.currentAnalyserLevel ?? 0
+
+    this.waveGraphics.clear()
+    this.waveDefs.forEach((wave, index) => {
+      this.drawWave(width, height, wave, delta, index, freqBuckets, analyserLevel)
+    })
+
+    if (!this.bossActive) {
+      this.updatePlaceholders(delta)
+    }
+    this.updatePlayerOnWave(time, delta)
+    this.updateProjectiles(delta)
+    this.updatePowerup(time)
+    if (this.bossActive) {
+      this.updateBoss(delta, time)
+    }
+  }
+
+  pollInput() {
+    if (!this.cursors) return
+    const upPressed =
+      Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
+      Phaser.Input.Keyboard.JustDown(this.altKeys.up)
+    const downPressed =
+      Phaser.Input.Keyboard.JustDown(this.cursors.down) ||
+      Phaser.Input.Keyboard.JustDown(this.altKeys.down)
+
+    if (upPressed) {
+      this.changeLane(-1)
+    } else if (downPressed) {
+      this.changeLane(1)
+    }
+  }
+
+  changeLane(delta) {
+    if (!this.waveDefs.length) return
+    const maxIndex = this.waveDefs.length - 1
+    const nextLane = Phaser.Math.Clamp(this.currentLane + delta, 0, maxIndex)
+    if (nextLane === this.currentLane) return
+    this.currentLane = nextLane
+    this.trickMeter = 0
+    this.syncHudStatus()
+    this.updateLaneMarker()
+    this.playLaneTrack()
+    // Lane labels removed
+    this.showLaneTrackAnnouncement()
+    this.updateCombo(true)
+  }
+
+
+  async playLaneTrack() {
+    if (!this.player || !this.playlist.length) return
+    const trackIndex = Math.min(this.currentLane, this.playlist.length - 1)
+    try {
+      await this.player.playTrackAtIndex(trackIndex, true)
+    } catch (error) {
+      console.error('[WaveScene] Failed to switch lane track', error)
+    }
+  }
+
+  updateLaneMarker() {
+    const { height } = this.scale
+    const yBase = height * 0.2 + this.currentLane * 80
+  }
+
+  // Lane labels removed
+
+  updateCombo(laneSwitch = false) {
+    if (laneSwitch) {
+      this.comboValue = Math.max(1, this.comboValue + 1)
+    } else {
+      this.comboValue = Math.max(1, this.comboValue - 1)
+    }
+    this.comboText?.setText(`Combo x${this.comboValue}`)
+  }
+
+  incrementTrickMeter(delta) {
+    this.trickMeter = Math.min(100, this.trickMeter + delta * 0.003)
+    this.syncHudStatus()
+  }
+
+  performTrick() {
+    if (this.trickMeter < this.trickThreshold) return
+    
+    this.trickMeter = 0
+    this.comboValue += 2
+    this.comboText?.setText(`Combo x${this.comboValue}`)
+    this.playerScore += 100 * this.comboValue
+    this.syncHudStatus()
+    
+    // Play random announcer cue
+    const cue = Phaser.Utils.Array.GetRandom(this.trickCuePool)
+    this.playCue(cue ?? 'trick1')
+    
+    // Execute random trick animation
+    const animType = Phaser.Utils.Array.GetRandom(this.trickAnimations)
+    this.executeTrickAnimation(animType)
+    
+    // Visual feedback
+    this.addFlash(0x50fa7b)
+  }
+
+  executeTrickAnimation(type) {
+    const baseDuration = 650
+    this.tweens.killTweensOf([this.playerSprite, this.playerGlow])
+    
+    switch (type) {
+      case 'spin':
+        this.tweens.add({
+          targets: this.playerSprite,
+          rotation: this.playerSprite.rotation + Math.PI * 2,
+          scale: { from: 1, to: 1.3 },
+          duration: baseDuration,
+          ease: 'Cubic.Out',
+          yoyo: true,
+        })
+        break
+      case 'flip':
+        this.tweens.add({
+          targets: this.playerSprite,
+          rotation: this.playerSprite.rotation + Math.PI * 3,
+          y: { from: this.playerSprite.y, to: this.playerSprite.y - 30 },
+          duration: baseDuration,
+          ease: 'Back.Out',
+          yoyo: true,
+        })
+        break
+      case 'twist':
+        this.tweens.add({
+          targets: this.playerSprite,
+          rotation: this.playerSprite.rotation + Math.PI * 4,
+          scaleX: { from: 1, to: 1.4 },
+          scaleY: { from: 1, to: 0.6 },
+          duration: baseDuration,
+          ease: 'Elastic.Out',
+          yoyo: true,
+        })
+        break
+      case 'barrel':
+        this.tweens.add({
+          targets: this.playerSprite,
+          rotation: this.playerSprite.rotation + Math.PI * 5,
+          x: { from: this.playerSprite.x, to: this.playerSprite.x + 40 },
+          scale: { from: 1, to: 1.25 },
+          duration: baseDuration,
+          ease: 'Sine.InOut',
+          yoyo: true,
+        })
+        break
+      default:
+        this.tweens.add({
+          targets: this.playerSprite,
+          rotation: this.playerSprite.rotation + Math.PI * 2,
+          scale: { from: 1, to: 1.2 },
+          duration: baseDuration,
+          ease: 'Cubic.Out',
+          yoyo: true,
+        })
+    }
+    
+    this.tweens.add({
+      targets: this.playerGlow,
+      alpha: { from: 0.9, to: 0.15 },
+      scale: { from: 1, to: 1.5 },
+      duration: baseDuration,
+      yoyo: true,
+    })
+  }
+
+  updatePlayerOnWave(time, delta) {
+    if (!this.playerSprite || !this.waveDefs.length) return
+    const { width } = this.scale
+    let horizontalInput = 0
+    if (this.cursors.left?.isDown || this.altKeys.left?.isDown) horizontalInput -= 1
+    if (this.cursors.right?.isDown || this.altKeys.right?.isDown) horizontalInput += 1
+
+    this.playerX += horizontalInput * PLAYER_SPEED * delta
+    this.playerX = Phaser.Math.Wrap(this.playerX, 0, width)
+
+    if (this.spaceKey?.isDown) {
+      this.firePlayerProjectile(time)
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.ctrlKey) && this.trickMeter >= this.trickThreshold) {
+      this.performTrick()
+    }
+
+    const fallbackInfo = { y: this.scale.height * 0.2 + this.currentLane * 80, slope: 0 }
+    const waveInfo = this.getWaveInfo(this.currentLane, this.playerX) ?? fallbackInfo
+    const waveY = waveInfo.y ?? fallbackInfo.y
+    const slope = waveInfo.slope ?? 0
+    this.playerBouncePhase += delta * 0.008
+    const bounce = Math.sin(this.playerBouncePhase) * PLAYER_BOUNCE_AMPLITUDE
+    const targetY = waveY - 18 + bounce
+
+    const lerpedY = Phaser.Math.Linear(this.playerSprite.y, targetY, PLAYER_LERP)
+    this.playerSprite.x = this.playerX
+    this.playerSprite.y = lerpedY
+    this.playerSprite.rotation = Phaser.Math.Angle.Wrap(slope + Math.sin(this.playerBouncePhase) * 0.25)
+    this.playerGlow.x = this.playerX
+    this.playerGlow.y = Phaser.Math.Linear(this.playerGlow.y, lerpedY, PLAYER_LERP)
+    this.incrementTrickMeter(delta)
+  }
+
+  spawnInitialPlaceholders() {
+    for (let i = 0; i < 6; i++) {
+      this.spawnPlaceholder(true)
+    }
+  }
+
+  spawnPlaceholder(initial = false) {
+    const lane = Phaser.Math.Between(0, Math.max(0, this.waveDefs.length - 1))
+    const type = Phaser.Math.RND.pick(['powerup', 'obstacle', 'ghost'])
+    const { width } = this.scale
+    const startX = initial ? Phaser.Math.Between(0, width) : -80
+
+    let shape
+    let powerupKind = null
+    if (type === 'powerup') {
+      powerupKind = Phaser.Math.RND.pick(POWERUP_TYPES)
+      const spriteKey = `powerup-${powerupKind}`
+      if (this.textures.exists(spriteKey)) {
+        shape = this.add.image(0, 0, spriteKey)
+        shape.setDisplaySize(48, 32)
+        shape.setTint(0xffffff)
+      } else {
+        shape = this.add.star(0, 0, 5, 8, 16, 0x4ecdc4, 1).setStrokeStyle(0)
+      }
+    } else if (type === 'ghost') {
+      shape = this.add.rectangle(0, 0, 26, 48, 0x9be7ff, 0.5).setStrokeStyle(0)
+    } else {
+      shape = this.add.triangle(0, 0, -16, 20, 16, 20, 0, -20, 0xff6b6b, 1).setStrokeStyle(0)
+    }
+
+    const initialY = this.sampleWaveY(lane, startX)
+    shape.setPosition(startX, initialY)
+    const entry = {
+      sprite: shape,
+      lane,
+      type,
+      speed: 0.08 + lane * 0.015,
+      x: startX,
+      fireCooldown: Phaser.Math.Between(900, 1600),
+      fireElapsed: 0,
+      health: type === 'powerup' ? 0 : type === 'ghost' ? 20 : 35,
+      bouncePhase: Phaser.Math.FloatBetween(0, Math.PI * 2),
+    }
+    if (type === 'powerup') {
+      entry.powerupKind = powerupKind
+    }
+    this.placeholderPool.push(entry)
+  }
+
+  updatePlaceholders(delta) {
+    const { width } = this.scale
+    this.placeholderPool.forEach((entry) => {
+      if (entry.destroyed) {
+        return
+      }
+      entry.x += delta * entry.speed
+      entry.bouncePhase = (entry.bouncePhase ?? 0) + delta * 0.004
+      const waveInfo = this.getWaveInfo(entry.lane, entry.x) ?? { y: this.scale.height * 0.2 + entry.lane * 80, slope: 0 }
+      const baseY = waveInfo.y
+      const slope = waveInfo.slope ?? 0
+      const bounce = Math.sin(entry.bouncePhase) * OBJECT_BOUNCE_AMPLITUDE
+      entry.sprite.x = entry.x
+      entry.sprite.y = baseY + bounce
+      entry.sprite.rotation = Phaser.Math.Angle.Wrap(slope + Math.sin(entry.bouncePhase) * 0.3)
+
+      if (entry.lane === this.currentLane && !entry.hit && Math.abs(entry.x - this.playerSprite.x) < 40) {
+        entry.hit = true
+        this.handlePlaceholderCollision(entry)
+      }
+
+      if ((entry.type === 'obstacle' || entry.type === 'ghost') && !entry.hit) {
+        entry.fireElapsed = (entry.fireElapsed ?? 0) + delta
+        if (entry.fireElapsed >= entry.fireCooldown) {
+          entry.fireElapsed = 0
+          entry.fireCooldown = Phaser.Math.Between(900, 1600)
+          this.fireEnemyProjectile(entry)
+        }
+      }
+
+      if (entry.x > width + 80) {
+        this.destroyPlaceholder(entry, 0x04132b)
+      }
+    })
+
+    this.placeholderPool = this.placeholderPool.filter((entry) => !entry.destroyed)
+  }
+
+  handlePlaceholderCollision(entry) {
+    if (entry.type === 'powerup') {
+      this.comboValue += 1
+      this.comboText?.setText(`Combo x${this.comboValue}`)
+      this.playerScore += 50 * this.comboValue
+      this.activatePowerup(entry.powerupKind ?? 'shield')
+      this.destroyPlaceholder(entry, 0x4ecdc4)
+      this.syncHudStatus()
+      return
+    }
+
+    if (entry.type === 'ghost') {
+      this.comboValue = Math.max(1, this.comboValue - 1)
+      this.comboText?.setText(`Combo x${this.comboValue}`)
+      this.playerDamage(12)
+      this.destroyPlaceholder(entry, 0x9be7ff)
+      return
+    }
+
+    this.comboValue = 1
+    this.comboText?.setText(`Combo x${this.comboValue}`)
+    this.playerDamage(8)
+    this.destroyPlaceholder(entry, 0xff6b6b)
+  }
+
+  addFlash(color) {
+    const flash = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, color, 0.12)
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 400,
+      onComplete: () => flash.destroy(),
+    })
+  }
+
+  playCue(name) {
+    window.sidSurferAudio?.playCue?.(name)
+  }
+
+  destroyPlaceholder(entry, flashColor = 0xff6b6b) {
+    if (!entry || entry.destroyed) return
+    entry.destroyed = true
+    entry.sprite?.destroy()
+    if (flashColor) {
+      this.addFlash(flashColor)
+    }
+  }
+
+  activatePowerup(kind) {
+    const config = POWERUP_CONFIG[kind]
+    if (!config) return
+    if (kind === 'heal') {
+      this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + (config.heal ?? 20))
+      this.showPowerupText('HEALTH SURGE +', '#50fa7b')
+      this.playCue('powerupHeal')
+      this.syncHudStatus()
+      return
+    }
+    const now = this.time.now
+    if (this.activePowerup === kind) {
+      this.powerupExpiresAt = Math.max(this.powerupExpiresAt, now) + config.duration
+    } else {
+      this.activePowerup = kind
+      this.powerupExpiresAt = now + config.duration
+    }
+    this.showPowerupText(config.label, '#ffe66d')
+    const cueName = kind === 'rockets' ? 'powerupRockets' : 'powerupShield'
+    this.playCue(cueName)
+    this.syncHudStatus()
+  }
+
+  updatePowerup(time) {
+    if (this.activePowerup) {
+      if (time > this.powerupExpiresAt) {
+        this.activePowerup = null
+        this.powerupExpiresAt = 0
+        this.showPowerupText('Power Down', '#c4c9ff')
+      }
+    } else if (this.powerupLabel) {
+      this.powerupLabel.setAlpha(0)
+    }
+    this.syncHudStatus()
+  }
+
+  showPowerupText(message, color) {
+    const { width } = this.scale
+    if (!this.powerupLabel) {
+      this.powerupLabel = this.add
+        .text(width / 2, this.scale.height * 0.25, message, {
+          fontFamily: 'Orbitron, Rajdhani, monospace',
+          fontSize: '20px',
+          color,
+        })
+        .setOrigin(0.5)
+        .setAlpha(0)
+    } else {
+      this.powerupLabel.setText(message)
+      this.powerupLabel.setColor(color)
+    }
+    this.powerupLabel.setAlpha(0)
+    this.powerupLabel.setScale(0.8)
+    this.tweens.killTweensOf(this.powerupLabel)
+    this.tweens.add({
+      targets: this.powerupLabel,
+      alpha: { from: 0, to: 1 },
+      scale: { from: 0.8, to: 1 },
+      duration: 300,
+      ease: 'Quad.Out',
+      yoyo: true,
+      hold: 600,
+    })
+  }
+
+  firePlayerProjectile(time) {
+    const fireDelay =
+      this.activePowerup === 'rockets' ? PLAYER_FIRE_DELAY * ROCKET_FIRE_DELAY_MULTIPLIER : PLAYER_FIRE_DELAY
+    if (time - this.lastPlayerShot < fireDelay) {
+      return
+    }
+    this.lastPlayerShot = time
+    const isRocket = this.activePowerup === 'rockets'
+    const baseColor = isRocket ? 0xff6b6b : 0x4ecdc4
+    
+    let sprite, glow
+    if (isRocket) {
+      sprite = this.add.triangle(this.playerX - 16, this.playerSprite.y, 0, -8, -6, 6, 6, 6, baseColor, 1)
+      sprite.setRotation(0)
+      sprite.setAlpha(0.95)
+      sprite.setBlendMode(Phaser.BlendModes.ADD)
+      
+      glow = this.add.triangle(this.playerX - 16, this.playerSprite.y, 0, -10, -8, 8, 8, 8, baseColor, 0.5)
+      glow.setRotation(0)
+      glow.setBlendMode(Phaser.BlendModes.ADD)
+      glow.setAlpha(0.7)
+      
+      const thrustFlame = this.add.triangle(this.playerX - 16, this.playerSprite.y, 0, 8, -4, 16, 4, 16, 0xff6600, 1)
+      thrustFlame.setRotation(0)
+      thrustFlame.setBlendMode(Phaser.BlendModes.ADD)
+      thrustFlame.setAlpha(0.9)
+      
+      const thrustCore = this.add.triangle(this.playerX - 16, this.playerSprite.y, 0, 8, -2, 14, 2, 14, 0xffff00, 1)
+      thrustCore.setRotation(0)
+      thrustCore.setBlendMode(Phaser.BlendModes.ADD)
+      thrustCore.setAlpha(1)
+      
+      this.tweens.add({
+        targets: [thrustFlame, thrustCore],
+        alpha: { from: 0.9, to: 0.4 },
+        scaleY: { from: 1, to: 1.5 },
+        duration: 100,
+        ease: 'Sine.InOut',
+        repeat: -1,
+        yoyo: true,
+      })
+      
+      const projectile = {
+        sprite,
+        glow,
+        thrustFlame,
+        thrustCore,
+        speed: -0.18,
+        damage: 25,
+        isRocket: true,
+        target: this.findNearestEnemy(this.playerX, this.playerSprite.y),
+        homingSpeed: 0.18,
+      }
+      this.playerProjectiles.push(projectile)
+    } else {
+      sprite = this.add.rectangle(this.playerX - 16, this.playerSprite.y, 20, 3, baseColor, 1)
+      sprite.setAlpha(1)
+      sprite.setBlendMode(Phaser.BlendModes.ADD)
+      
+      glow = this.add.rectangle(this.playerX - 16, this.playerSprite.y, 24, 7, baseColor, 0.6)
+      glow.setBlendMode(Phaser.BlendModes.ADD)
+      glow.setAlpha(0.8)
+      
+      const outerGlow = this.add.rectangle(this.playerX - 16, this.playerSprite.y, 28, 11, baseColor, 0.3)
+      outerGlow.setBlendMode(Phaser.BlendModes.ADD)
+      outerGlow.setAlpha(0.6)
+      
+      this.tweens.add({
+        targets: [glow, outerGlow],
+        alpha: { from: 0.8, to: 0.3 },
+        scale: { from: 1, to: 1.2 },
+        duration: 150,
+        ease: 'Quad.Out',
+      })
+      
+      const projectile = {
+        sprite,
+        glow,
+        outerGlow,
+        speed: -0.4,
+        damage: 15,
+        isRocket: false,
+        target: null,
+        homingSpeed: 0.15,
+      }
+      this.playerProjectiles.push(projectile)
+    }
+    this.playCue('playerFire')
+  }
+
+  findNearestEnemy(fromX, fromY) {
+    let nearest = null
+    let nearestDist = Infinity
+    for (const entry of this.placeholderPool) {
+      if (!entry || entry.destroyed || entry.type === 'powerup') continue
+      const dist = Phaser.Math.Distance.Between(fromX, fromY, entry.sprite.x, entry.sprite.y)
+      if (dist < nearestDist && dist < 400) {
+        nearestDist = dist
+        nearest = entry
+      }
+    }
+    return nearest
+  }
+
+  fireEnemyProjectile(entry) {
+    if (!entry?.sprite) return
+    const baseColor = 0xff6b6b
+    const sprite = this.add.rectangle(entry.sprite.x + 12, entry.sprite.y, 16, 6, baseColor, 1)
+    sprite.setAlpha(0.9)
+    sprite.setBlendMode(Phaser.BlendModes.ADD)
+    
+    const glow = this.add.rectangle(entry.sprite.x + 12, entry.sprite.y, 20, 10, baseColor, 0.4)
+    glow.setBlendMode(Phaser.BlendModes.ADD)
+    glow.setAlpha(0.5)
+    
+    this.tweens.add({
+      targets: glow,
+      alpha: { from: 0.5, to: 0.1 },
+      scale: { from: 1, to: 1.4 },
+      duration: 250,
+      ease: 'Quad.Out',
+    })
+    
+    this.enemyProjectiles.push({
+      sprite,
+      glow,
+      speed: 0.28,
+      damage: 10,
+    })
+    this.playCue('enemyFire')
+  }
+
+  updateProjectiles(delta) {
+    const width = this.scale.width
+    this.playerProjectiles = this.playerProjectiles.filter((projectile) => {
+      if (projectile.isRocket && projectile.target && !projectile.target.destroyed) {
+        const targetX = projectile.target.sprite.x
+        const targetY = projectile.target.sprite.y
+        const dx = targetX - projectile.sprite.x
+        const dy = targetY - projectile.sprite.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (dist > 5) {
+          const angle = Math.atan2(dy, dx)
+          const baseSpeed = Math.abs(projectile.speed)
+          const homing = projectile.homingSpeed * delta
+          projectile.sprite.x += Math.cos(angle) * delta * baseSpeed + dx * homing
+          projectile.sprite.y += Math.sin(angle) * delta * baseSpeed + dy * homing
+          projectile.sprite.rotation = angle
+          if (projectile.glow) {
+            projectile.glow.x = projectile.sprite.x
+            projectile.glow.y = projectile.sprite.y
+            projectile.glow.rotation = projectile.sprite.rotation
+          }
+          if (projectile.thrustFlame && projectile.thrustCore) {
+            const thrustOffsetX = Math.cos(angle + Math.PI) * 8
+            const thrustOffsetY = Math.sin(angle + Math.PI) * 8
+            projectile.thrustFlame.x = projectile.sprite.x + thrustOffsetX
+            projectile.thrustFlame.y = projectile.sprite.y + thrustOffsetY
+            projectile.thrustFlame.rotation = angle + Math.PI
+            projectile.thrustCore.x = projectile.sprite.x + thrustOffsetX
+            projectile.thrustCore.y = projectile.sprite.y + thrustOffsetY
+            projectile.thrustCore.rotation = angle + Math.PI
+          }
+        } else {
+          projectile.sprite.x += delta * projectile.speed
+          if (projectile.glow) {
+            projectile.glow.x = projectile.sprite.x
+            projectile.glow.y = projectile.sprite.y
+          }
+          if (projectile.outerGlow) {
+            projectile.outerGlow.x = projectile.sprite.x
+            projectile.outerGlow.y = projectile.sprite.y
+          }
+          if (projectile.thrustFlame && projectile.thrustCore) {
+            projectile.thrustFlame.x = projectile.sprite.x + 8
+            projectile.thrustFlame.y = projectile.sprite.y
+            projectile.thrustFlame.rotation = Math.PI
+            projectile.thrustCore.x = projectile.sprite.x + 8
+            projectile.thrustCore.y = projectile.sprite.y
+            projectile.thrustCore.rotation = Math.PI
+          }
+        }
+      } else {
+        projectile.sprite.x += delta * projectile.speed
+        if (projectile.glow) {
+          projectile.glow.x = projectile.sprite.x
+          projectile.glow.y = projectile.sprite.y
+        }
+        if (projectile.outerGlow) {
+          projectile.outerGlow.x = projectile.sprite.x
+          projectile.outerGlow.y = projectile.sprite.y
+        }
+        if (projectile.thrustFlame && projectile.thrustCore) {
+          projectile.thrustFlame.x = projectile.sprite.x + 8
+          projectile.thrustFlame.y = projectile.sprite.y
+          projectile.thrustFlame.rotation = Math.PI
+          projectile.thrustCore.x = projectile.sprite.x + 8
+          projectile.thrustCore.y = projectile.sprite.y
+          projectile.thrustCore.rotation = Math.PI
+        }
+        if (projectile.isRocket && !projectile.target) {
+          projectile.target = this.findNearestEnemy(projectile.sprite.x, projectile.sprite.y)
+        }
+      }
+      const hit = this.tryProjectileHit(projectile)
+      if (hit || projectile.sprite.x < -60 || projectile.sprite.x > width + 60) {
+        projectile.sprite.destroy()
+        if (projectile.glow) {
+          projectile.glow.destroy()
+        }
+        if (projectile.outerGlow) {
+          projectile.outerGlow.destroy()
+        }
+        if (projectile.thrustFlame) {
+          projectile.thrustFlame.destroy()
+        }
+        if (projectile.thrustCore) {
+          projectile.thrustCore.destroy()
+        }
+        return false
+      }
+      return true
+    })
+
+    this.enemyProjectiles = this.enemyProjectiles.filter((projectile) => {
+      projectile.sprite.x += delta * projectile.speed
+      if (projectile.glow) {
+        projectile.glow.x = projectile.sprite.x
+        projectile.glow.y = projectile.sprite.y
+      }
+      if (this.tryEnemyProjectileHit(projectile)) {
+        projectile.sprite.destroy()
+        if (projectile.glow) {
+          projectile.glow.destroy()
+        }
+        return false
+      }
+      if (projectile.sprite.x > width + 40) {
+        projectile.sprite.destroy()
+        if (projectile.glow) {
+          projectile.glow.destroy()
+        }
+        return false
+      }
+      return true
+    })
+  }
+
+  tryProjectileHit(projectile) {
+    for (const entry of this.placeholderPool) {
+      if (!entry || entry.destroyed || entry.type === 'powerup') continue
+      const dist = Phaser.Math.Distance.Between(projectile.sprite.x, projectile.sprite.y, entry.sprite.x, entry.sprite.y)
+      if (dist < 20) {
+        entry.health -= projectile.damage
+        if (entry.health <= 0) {
+          const baseScore = entry.type === 'ghost' ? 75 : 100
+          this.playerScore += baseScore * this.comboValue
+          this.comboValue += 1
+          this.comboText?.setText(`Combo x${this.comboValue}`)
+          this.createExplosion(entry.sprite.x, entry.sprite.y, 0x84f0ff)
+          this.destroyPlaceholder(entry, 0x84f0ff)
+          this.syncHudStatus()
+        }
+        return true
+      }
+    }
+    return false
+  }
+
+  tryEnemyProjectileHit(projectile) {
+    if (!this.playerSprite) return false
+    const dist = Phaser.Math.Distance.Between(projectile.sprite.x, projectile.sprite.y, this.playerSprite.x, this.playerSprite.y)
+    if (dist < 24) {
+      this.createExplosion(projectile.sprite.x, projectile.sprite.y, 0xff6b6b, 0.5)
+      this.playerDamage(projectile.damage)
+      return true
+    }
+    return false
+  }
+
+  playerDamage(amount) {
+    let finalDamage = amount
+    if (this.activePowerup === 'shield') {
+      finalDamage *= 0.4
+    }
+    this.playerHealth = Math.max(0, this.playerHealth - finalDamage)
+    this.playCue('hit')
+    this.syncHudStatus()
+    if (this.playerHealth <= 0) {
+      this.handlePlayerDefeat()
+    }
+  }
+
+  handlePlayerDefeat() {
+    if (this.playerSprite) {
+      this.createExplosion(this.playerSprite.x, this.playerSprite.y, 0xff0000, 1.2)
+    }
+    this.addFlash(0xff0000)
+    this.syncHudStatus()
+    
+    setTimeout(() => {
+      if (window.sidSurfer?.game) {
+        const composerIndex = window.activeComposerIndex ?? 0
+        this.scene.pause()
+        this.scene.stop()
+        if (window.sidPlayer) {
+          window.sidPlayer.stop().catch(console.error)
+        }
+        window.sidSurfer.game.scene.start('GameOverScene', {
+          score: this.playerScore,
+          composerReached: composerIndex + 1,
+          composerName: this.composerName,
+        })
+      }
+    }, 1500)
+  }
+
+  syncHudStatus() {
+    const remaining = this.activePowerup ? Math.max(0, this.powerupExpiresAt - this.time.now) : 0
+    window.sidSurferHud?.updateStatus?.({
+      score: this.playerScore,
+      health: this.playerHealth,
+      maxHealth: this.playerMaxHealth,
+      powerup: this.activePowerup,
+      powerupTime: remaining,
+      trick: this.trickMeter,
+      bossHealth: this.bossHealth,
+      bossMaxHealth: this.bossActive ? this.bossMaxHealth : 0,
+    })
+  }
+
+  handleLevelIntro(payload = {}) {
+    const title = payload.title ?? ''
+    if (!title) return
+    const { width, height } = this.scale
+    if (!this.levelIntroLabel) {
+      this.levelIntroLabel = this.add
+        .text(width / 2, height * 0.15, title, {
+          fontFamily: 'Orbitron, Rajdhani, monospace',
+          fontSize: '32px',
+          color: '#ffe66d',
+        })
+        .setOrigin(0.5)
+        .setAlpha(0)
+    } else {
+      this.levelIntroLabel.setText(title)
+    }
+    this.levelIntroLabel.setAlpha(0)
+    this.levelIntroLabel.setScale(0.7)
+    this.tweens.killTweensOf(this.levelIntroLabel)
+    this.tweens.add({
+      targets: this.levelIntroLabel,
+      alpha: { from: 0, to: 1 },
+      scale: { from: 0.7, to: 1 },
+      duration: 700,
+      ease: 'Quad.Out',
+      yoyo: true,
+      hold: 1000,
+    })
+  }
+
+  showLaneTrackAnnouncement() {
+    const currentTrack = this.playlist[Math.min(this.currentLane, this.playlist.length - 1)]
+    if (!currentTrack) return
+    const title = currentTrack.name ?? currentTrack.path?.split('/').pop() ?? 'SID Track'
+    const author = currentTrack.author ?? this.composerName ?? 'Unknown'
+    const yearSuffix = currentTrack.year ? ` · ${currentTrack.year}` : ''
+    const message = `${title} · ${author}${yearSuffix}`
+    const { width, height } = this.scale
+    if (!this.trackAnnouncementLabel) {
+      this.trackAnnouncementLabel = this.add
+        .text(width / 2, height - 80, message, {
+          fontFamily: 'Orbitron, Rajdhani, monospace',
+          fontSize: '22px',
+          color: '#84f0ff',
+        })
+        .setOrigin(0.5)
+        .setAlpha(0)
+    } else {
+      this.trackAnnouncementLabel.setText(message)
+    }
+    this.trackAnnouncementLabel.setAlpha(0)
+    this.trackAnnouncementLabel.setScale(0.85)
+    this.tweens.killTweensOf(this.trackAnnouncementLabel)
+    this.tweens.add({
+      targets: this.trackAnnouncementLabel,
+      alpha: { from: 0, to: 1 },
+      scale: { from: 0.85, to: 1 },
+      duration: 450,
+      ease: 'Quad.Out',
+      yoyo: true,
+      hold: 1200,
+    })
+  }
+
+  handleTrackAnnouncement(payload = {}) {
+    const title = payload.title ?? 'SID Track'
+    const author = payload.author ?? 'Unknown'
+    const yearSuffix = payload.year ? ` · ${payload.year}` : ''
+    const message = `${title} · ${author}${yearSuffix}`
+    const { width, height } = this.scale
+    if (!this.trackAnnouncementLabel) {
+      this.trackAnnouncementLabel = this.add
+        .text(width / 2, height - 80, message, {
+          fontFamily: 'Rajdhani, monospace',
+          fontSize: '22px',
+          color: '#84f0ff',
+        })
+        .setOrigin(0.5)
+        .setAlpha(0)
+    } else {
+      this.trackAnnouncementLabel.setText(message)
+    }
+    this.trackAnnouncementLabel.setAlpha(0)
+    this.trackAnnouncementLabel.setScale(0.85)
+    this.tweens.killTweensOf(this.trackAnnouncementLabel)
+    this.tweens.add({
+      targets: this.trackAnnouncementLabel,
+      alpha: { from: 0, to: 1 },
+      scale: { from: 0.85, to: 1 },
+      duration: 450,
+      ease: 'Quad.Out',
+      yoyo: true,
+      hold: 1200,
+    })
+  }
+
+  sampleWaveY(laneIndex, x) {
+    const wave = this.waveDefs[laneIndex]
+    if (!wave) {
+      return this.scale.height * 0.2 + laneIndex * 80
+    }
+    const points = wave.cachedPoints
+    if (!points?.length) {
+      return this.scale.height * 0.2 + laneIndex * 80
+    }
+    const width = this.scale.width
+    const wrappedX = Phaser.Math.Wrap(x, 0, width)
+    const idx = Math.min(points.length - 1, Math.floor((wrappedX / width) * points.length))
+    return points[idx].y
+  }
+
+  getWaveInfo(laneIndex, x) {
+    const wave = this.waveDefs[laneIndex]
+    if (!wave) {
+      const fallbackY = this.scale.height * 0.2 + laneIndex * 80
+      return { y: fallbackY, slope: 0 }
+    }
+    const points = wave.cachedPoints
+    if (!points?.length) {
+      const fallbackY = this.scale.height * 0.2 + laneIndex * 80
+      return { y: fallbackY, slope: 0 }
+    }
+    const width = this.scale.width
+    const wrappedX = Phaser.Math.Wrap(x, 0, width)
+    const idx = Math.min(points.length - 1, Math.floor((wrappedX / width) * points.length))
+    const point = points[idx]
+    if (!point) {
+      const fallbackY = this.scale.height * 0.2 + laneIndex * 80
+      return { y: fallbackY, slope: 0 }
+    }
+    const nextIdx = Math.min(points.length - 1, idx + 1)
+    const nextPoint = points[nextIdx]
+    const dx = nextPoint.x - point.x
+    const dy = nextPoint.y - point.y
+    const slope = Math.atan2(dy, dx)
+    return { y: point.y, slope }
+  }
+
+  drawWave(width, height, wave, delta, index, freqBuckets, analyserLevelValue) {
+    const graphics = this.waveGraphics
+    const yBase = height * 0.2 + index * 80
+    const amplitudeBase = wave.amplitude
+    const frequency = wave.frequency
+    const turbulence = wave.turbulence
+    const speed = wave.speed
+    const isActive = index === this.currentLane
+    const analyserLevel = isActive ? analyserLevelValue ?? 0 : 0
+    const easedLevel = (wave.visualLevel = Phaser.Math.Linear(
+      wave.visualLevel ?? 0,
+      analyserLevel,
+      isActive ? 0.2 : 0.08,
+    ))
+    const amplitude =
+      isActive ? amplitudeBase * (1 + easedLevel * 2.8) : amplitudeBase * 0.4
+
+    wave.phase = (wave.phase ?? 0) + speed * 0.00004 * delta
+    wave.turbulencePhase = (wave.turbulencePhase ?? 0) + 0.0005 * delta
+
+    const baseColor = Phaser.Display.Color.ValueToColor(wave.color)
+    const tone = isActive ? baseColor.clone().lighten(25) : baseColor.clone().darken(15)
+    const strokeColor = tone.color
+    const strokeAlpha = isActive ? 0.95 : 0.35
+    const strokeWidth = isActive ? 12 : 3
+
+    const buckets = freqBuckets ?? []
+    const points = []
+    for (let x = 0; x <= width; x += 3) {
+      const scrollX = x + this.waveScroll
+      const bucketIndex = buckets.length
+        ? Math.min(buckets.length - 1, Math.floor((scrollX / width) * buckets.length))
+        : 0
+      const spectralValue = buckets.length ? buckets[bucketIndex] ?? 0 : 0
+      const wavePhase = wave.phase + scrollX * frequency * (1 + easedLevel * 0.45)
+      const turbulenceOffset =
+        Math.sin(scrollX * 0.03 + wave.turbulencePhase) * (turbulence + easedLevel * 22 + spectralValue * 28)
+      const y =
+        yBase +
+        Math.sin(wavePhase) * (amplitude + spectralValue * amplitudeBase * (isActive ? 1.2 : 0.4)) +
+        turbulenceOffset +
+        spectralValue * (isActive ? 12 : 4)
+      points.push(new Phaser.Geom.Point(x, y))
+    }
+    wave.cachedPoints = points
+
+    graphics.lineStyle(strokeWidth, strokeColor, strokeAlpha)
+    graphics.beginPath()
+    points.forEach((point, idx) => {
+      if (idx === 0) {
+        graphics.moveTo(point.x, point.y)
+      } else {
+        graphics.lineTo(point.x, point.y)
+      }
+    })
+    graphics.strokePath()
+
+    if (isActive) {
+      const glowColor = baseColor.clone().saturate(30).brighten(20).color
+      graphics.lineStyle(3, glowColor, 0.85)
+      graphics.beginPath()
+      points.forEach((point, idx) => {
+        if (idx === 0) {
+          graphics.moveTo(point.x, point.y)
+        } else {
+          graphics.lineTo(point.x, point.y)
+        }
+      })
+      graphics.strokePath()
+      for (let ghost = 1; ghost <= 3; ghost++) {
+        const ghostPoints = points.map((p) => new Phaser.Geom.Point(p.x, p.y + ghost * 10))
+        graphics.lineStyle(Math.max(2, strokeWidth - ghost * 2), glowColor, 0.2 / ghost)
+        graphics.beginPath()
+        ghostPoints.forEach((point, idx) => {
+          if (idx === 0) {
+            graphics.moveTo(point.x, point.y)
+          } else {
+            graphics.lineTo(point.x, point.y)
+          }
+        })
+        graphics.strokePath()
+      }
+    }
+  }
+
+  drawBackground(width, height) {
+    const bg = this.background
+    bg.clear()
+    bg.fillGradientStyle(0x1b0650, 0x3a0ca3, 0x062449, 0x04132b, 1)
+    bg.fillRect(0, 0, width, height * 0.6)
+    bg.fillGradientStyle(0x041a2b, 0x072b3f, 0x01060f, 0x01060f, 1)
+    bg.fillRect(0, height * 0.6, width, height * 0.4)
+  }
+
+  createWaveSet(count) {
+    if (!count) {
+      return this.createDefaultWaves()
+    }
+    return Array.from({ length: count }, (_, i) => ({
+      amplitude: 50 + (i % 3) * 25,
+      frequency: 0.004 + (i * 0.0015) % 0.007,
+      speed: 25 + (i % 5) * 6,
+      turbulence: 12 + (i % 3) * 4,
+      color: COLORS[i % COLORS.length],
+    }))
+  }
+
+  createDefaultWaves() {
+    return Array.from({ length: 5 }, (_, i) => ({
+      amplitude: Phaser.Math.Between(60, 110),
+      frequency: Phaser.Math.FloatBetween(0.004, 0.01),
+      speed: Phaser.Math.Between(25, 48),
+      turbulence: Phaser.Math.Between(10, 18),
+      color: COLORS[i % COLORS.length],
+    }))
+  }
+
+  startBossFight() {
+    if (this.bossActive) return
+    this.bossActive = true
+    this.bossHealth = this.bossMaxHealth
+    this.bossLane = this.currentLane
+    const { width, height } = this.scale
+    this.bossX = -80
+
+    const timerEl = document.querySelector('#level-timer')
+    if (timerEl) {
+      timerEl.textContent = 'BOSS FIGHT!'
+      timerEl.classList.add('boss-fight')
+    }
+
+    this.spawnTimer?.remove()
+    this.placeholderPool.forEach((entry) => {
+      if (entry && !entry.destroyed) {
+        entry.sprite.destroy()
+      }
+    })
+    this.placeholderPool = []
+
+    this.bossSprite = this.add.rectangle(this.bossX, height * 0.2 + this.bossLane * 80, 60, 60, 0xff0000, 1)
+    this.bossSprite.setStrokeStyle(3, 0xff4444, 1)
+    this.bossSprite.setBlendMode(Phaser.BlendModes.ADD)
+
+    this.bossGlow = this.add.circle(this.bossX, height * 0.2 + this.bossLane * 80, 40, 0xff0000, 0.3)
+    this.bossGlow.setBlendMode(Phaser.BlendModes.ADD)
+
+    this.tweens.add({
+      targets: this.bossGlow,
+      alpha: { from: 0.3, to: 0.6 },
+      scale: { from: 0.9, to: 1.1 },
+      duration: 500,
+      ease: 'Sine.InOut',
+      repeat: -1,
+      yoyo: true,
+    })
+
+    this.tweens.add({
+      targets: [this.bossSprite, this.bossGlow],
+      x: width * 0.2,
+      duration: 1500,
+      ease: 'Power2',
+      onComplete: () => {
+        this.bossX = width * 0.2
+      },
+    })
+  }
+
+  updateBoss(delta, time) {
+    if (!this.bossActive || !this.bossSprite) return
+    const { width, height } = this.scale
+
+    if (this.bossLane !== this.currentLane) {
+      this.bossLane = this.currentLane
+      const targetY = height * 0.2 + this.bossLane * 80
+      this.tweens.add({
+        targets: [this.bossSprite, this.bossGlow],
+        y: targetY,
+        duration: 400,
+        ease: 'Power2',
+      })
+    }
+
+    const waveY = this.sampleWaveY(this.bossLane, this.bossX)
+    const targetY = waveY
+    this.bossSprite.y = Phaser.Math.Linear(this.bossSprite.y, targetY, 0.1)
+    if (this.bossGlow) {
+      this.bossGlow.x = this.bossSprite.x
+      this.bossGlow.y = this.bossSprite.y
+    }
+
+    this.bossFireCooldown -= delta
+    if (this.bossFireCooldown <= 0) {
+      this.fireBossProjectile()
+      this.bossFireCooldown = Phaser.Math.Between(400, 800)
+    }
+
+    const bossHealthPercent = (this.bossHealth / this.bossMaxHealth) * 100
+    if (bossHealthPercent <= 25) {
+      this.bossDroneCooldown -= delta
+      if (this.bossDroneCooldown <= 0) {
+        this.launchBossDrone()
+        this.bossDroneCooldown = Phaser.Math.Between(2000, 3500)
+      }
+    }
+
+    this.bossDrones = this.bossDrones.filter((drone) => {
+      if (!drone.sprite || drone.sprite.destroyed || !this.playerSprite) return false
+      
+      const dx = this.playerSprite.x - drone.sprite.x
+      const dy = this.playerSprite.y - drone.sprite.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      const angle = Math.atan2(dy, dx)
+      
+      const homingSpeed = 0.15
+      drone.sprite.x += Math.cos(angle) * delta * drone.speed + dx * homingSpeed * delta
+      drone.sprite.y += Math.sin(angle) * delta * drone.speed + dy * homingSpeed * delta
+      
+      if (dist < 30) {
+        this.createExplosion(drone.sprite.x, drone.sprite.y, 0xff6600)
+        drone.sprite.destroy()
+        this.playerDamage(20)
+        return false
+      }
+      
+      if (drone.sprite.x > width + 50 || drone.sprite.x < -50 || drone.sprite.y < -50 || drone.sprite.y > height + 50) {
+        drone.sprite.destroy()
+        return false
+      }
+      
+      return true
+    })
+
+    this.bossProjectiles = this.bossProjectiles.filter((proj) => {
+      proj.sprite.x += delta * proj.speed
+      if (proj.glow) {
+        proj.glow.x = proj.sprite.x
+        proj.glow.y = proj.sprite.y
+      }
+      if (this.tryBossProjectileHit(proj)) {
+        proj.sprite.destroy()
+        if (proj.glow) {
+          proj.glow.destroy()
+        }
+        return false
+      }
+      if (proj.sprite.x > width + 40) {
+        proj.sprite.destroy()
+        if (proj.glow) {
+          proj.glow.destroy()
+        }
+        return false
+      }
+      return true
+    })
+
+    for (const projectile of this.playerProjectiles) {
+      if (!projectile.sprite || projectile.sprite.x < this.bossX - 30 || projectile.sprite.x > this.bossX + 30) continue
+      if (!projectile.sprite || projectile.sprite.y < this.bossSprite.y - 30 || projectile.sprite.y > this.bossSprite.y + 30) continue
+      const dist = Phaser.Math.Distance.Between(projectile.sprite.x, projectile.sprite.y, this.bossSprite.x, this.bossSprite.y)
+      if (dist < 35) {
+        this.bossHealth -= projectile.damage
+        projectile.sprite.destroy()
+        if (projectile.glow) projectile.glow.destroy()
+        if (projectile.outerGlow) projectile.outerGlow.destroy()
+        if (projectile.thrustFlame) projectile.thrustFlame.destroy()
+        if (projectile.thrustCore) projectile.thrustCore.destroy()
+        this.createExplosion(projectile.sprite.x, projectile.sprite.y, 0xff0000, 0.6)
+        if (this.bossHealth <= 0) {
+          this.defeatBoss()
+        }
+      }
+    }
+  }
+
+  fireBossProjectile() {
+    if (!this.bossSprite) return
+    const baseColor = 0xff6b6b
+    const sprite = this.add.rectangle(this.bossSprite.x + 30, this.bossSprite.y, 20, 6, baseColor, 1)
+    sprite.setAlpha(0.9)
+    sprite.setBlendMode(Phaser.BlendModes.ADD)
+
+    const glow = this.add.rectangle(this.bossSprite.x + 30, this.bossSprite.y, 24, 10, baseColor, 0.4)
+    glow.setBlendMode(Phaser.BlendModes.ADD)
+    glow.setAlpha(0.5)
+
+    this.tweens.add({
+      targets: glow,
+      alpha: { from: 0.5, to: 0.1 },
+      scale: { from: 1, to: 1.4 },
+      duration: 250,
+      ease: 'Quad.Out',
+    })
+
+    this.bossProjectiles.push({
+      sprite,
+      glow,
+      speed: 0.35,
+      damage: 15,
+    })
+    this.playCue('enemyFire')
+  }
+
+  tryBossProjectileHit(projectile) {
+    if (!this.playerSprite) return false
+    const dist = Phaser.Math.Distance.Between(projectile.sprite.x, projectile.sprite.y, this.playerSprite.x, this.playerSprite.y)
+    if (dist < 24) {
+      this.playerDamage(projectile.damage)
+      return true
+    }
+    return false
+  }
+
+  launchBossDrone() {
+    if (!this.bossSprite || !this.playerSprite) return
+    const drone = this.add.image(this.bossSprite.x, this.bossSprite.y, 'drone')
+    drone.setDisplaySize(16, 16)
+    drone.setTint(0xff0000)
+    drone.setBlendMode(Phaser.BlendModes.ADD)
+    drone.setAlpha(0.9)
+    
+    this.tweens.add({
+      targets: drone,
+      rotation: { from: 0, to: Math.PI * 2 },
+      duration: 800,
+      repeat: -1,
+      ease: 'Linear',
+    })
+    
+    this.bossDrones.push({
+      sprite: drone,
+      speed: 0.12,
+    })
+  }
+
+  createExplosion(x, y, color = 0xff6600, scale = 1.0) {
+    this.playCue('explosion')
+    
+    const baseSize = 20 * scale
+    const particles = []
+    
+    for (let i = 0; i < 8; i++) {
+      const angle = (Math.PI * 2 * i) / 8
+      const particle = this.add.circle(x, y, 4 * scale, color, 1)
+      particle.setBlendMode(Phaser.BlendModes.ADD)
+      particle.setAlpha(1)
+      
+      const distance = baseSize + Phaser.Math.Between(0, baseSize)
+      const targetX = x + Math.cos(angle) * distance
+      const targetY = y + Math.sin(angle) * distance
+      
+      this.tweens.add({
+        targets: particle,
+        x: targetX,
+        y: targetY,
+        alpha: { from: 1, to: 0 },
+        scale: { from: 1, to: 0 },
+        duration: Phaser.Math.Between(300, 500),
+        ease: 'Power2',
+        onComplete: () => {
+          particle.destroy()
+        },
+      })
+      
+      particles.push(particle)
+    }
+    
+    const core = this.add.circle(x, y, baseSize, color, 1)
+    core.setBlendMode(Phaser.BlendModes.ADD)
+    core.setAlpha(1)
+    
+    this.tweens.add({
+      targets: core,
+      scale: { from: 0, to: 2 },
+      alpha: { from: 1, to: 0 },
+      duration: 400,
+      ease: 'Power2',
+      onComplete: () => {
+        core.destroy()
+      },
+    })
+    
+    const outerRing = this.add.circle(x, y, baseSize * 0.5, color, 0.6)
+    outerRing.setBlendMode(Phaser.BlendModes.ADD)
+    outerRing.setAlpha(0.8)
+    
+    this.tweens.add({
+      targets: outerRing,
+      scale: { from: 0.5, to: 3 },
+      alpha: { from: 0.8, to: 0 },
+      duration: 500,
+      ease: 'Power2',
+      onComplete: () => {
+        outerRing.destroy()
+      },
+    })
+  }
+
+  defeatBoss() {
+    this.bossActive = false
+    const bossX = this.bossSprite ? this.bossSprite.x : 0
+    const bossY = this.bossSprite ? this.bossSprite.y : 0
+    
+    if (this.bossSprite) {
+      this.bossSprite.destroy()
+    }
+    if (this.bossGlow) {
+      this.bossGlow.destroy()
+    }
+    this.bossProjectiles.forEach((proj) => {
+      proj.sprite.destroy()
+      if (proj.glow) proj.glow.destroy()
+    })
+    this.bossProjectiles = []
+    
+    this.bossDrones.forEach((drone) => {
+      if (drone.sprite) {
+        drone.sprite.destroy()
+      }
+    })
+    this.bossDrones = []
+
+    for (let i = 0; i < 5; i++) {
+      setTimeout(() => {
+        const offsetX = Phaser.Math.Between(-30, 30)
+        const offsetY = Phaser.Math.Between(-30, 30)
+        this.createExplosion(bossX + offsetX, bossY + offsetY, 0xff0000, 1.5)
+      }, i * 150)
+    }
+
+    const timerEl = document.querySelector('#level-timer')
+    if (timerEl) {
+      timerEl.classList.remove('boss-fight')
+      timerEl.textContent = '--:--'
+    }
+
+    this.playerScore += 5000
+    this.addFlash(0x50fa7b)
+    this.syncHudStatus()
+
+    setTimeout(() => {
+      if (window.advanceComposer) {
+        window.advanceComposer(1)
+      }
+    }, 3000)
+  }
+}
+

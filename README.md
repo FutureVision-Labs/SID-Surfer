@@ -1,2 +1,26 @@
-# SID-Surfer
-SID Surfer is a wave‑riding rhythm game powered by real Commodore 64 SID music (Tiny’R’Sid WASM) and Phaser 3. Surf reactive lanes, switch tracks per lane, pull tricks, collect power‑ups, and face boss fights. Composer profiles, arcade HUD, high scores, and DLC‑ready manifest included. Vite dev/build; GitHub Pages friendly.
+# SID Surfer
+
+Wave-riding rhythm game powered by real C64 SID music (Tiny’R’Sid) and Phaser 3.
+
+- Flow: Title → Composer Profile → Wave Scene → Boss → Game Over → High Scores
+- DLC-ready manifest: `public/sid/manifest.json` (packs can be merged later)
+- Vite dev/build; GitHub Pages compatible (`base: './'`)
+
+## Dev
+
+```bash
+npm install
+npm run dev
+```
+
+## Build
+
+```bash
+npm run build
+```
+
+## Credits
+
+FutureVision Labs · Phaser 3 · Tiny’R’Sid (WebAssembly) · Game Off 2025
+
+

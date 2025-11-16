@@ -1,0 +1,174 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600&family=Rajdhani:wght@400;600&display=swap');
+
+:root {
+  font-family: 'Rajdhani', 'Orbitron', 'Segoe UI', system-ui, sans-serif;
+  font-weight: 400;
+  color: #f7f7ff;
+  background-color: #04040a;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #120a2a, #04040a 60%);
+  color: #f7f7ff;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.hud {
+  background: rgba(4, 5, 21, 0.86);
+  border: 1px solid rgba(111, 115, 255, 0.4);
+  border-radius: 18px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 0 35px rgba(66, 135, 245, 0.25);
+}
+
+.hud-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.hud-line--status {
+  font-size: 0.95rem;
+  color: #bcd7ff;
+}
+
+.hud-line--status span {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.hud-line--status strong {
+  font-family: 'Orbitron', 'Rajdhani', monospace;
+  letter-spacing: 0.05em;
+}
+
+.hud-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hud-bar-group label {
+  font-size: 0.9rem;
+  color: #bcd7ff;
+  min-width: 3rem;
+}
+
+.glow-bar {
+  position: relative;
+  width: 120px;
+  height: 20px;
+  background: rgba(20, 25, 45, 0.8);
+  border: 1px solid rgba(100, 120, 200, 0.3);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.glow-bar__fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 10px;
+  transition: width 0.15s ease-out;
+  box-shadow: 0 0 12px currentColor;
+}
+
+.glow-bar__fill--health {
+  background: linear-gradient(90deg, #ff6b6b, #ff8e8e);
+  color: #ff6b6b;
+}
+
+.glow-bar__fill--trick {
+  background: linear-gradient(90deg, #ffe66d, #fff89e);
+  color: #ffe66d;
+}
+
+.glow-bar__glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  opacity: 0.6;
+  animation: pulse-glow 2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.glow-bar__glow--health {
+  background: radial-gradient(ellipse at center, rgba(255, 107, 107, 0.4), transparent 70%);
+  box-shadow: 0 0 20px rgba(255, 107, 107, 0.5);
+}
+
+.glow-bar__glow--trick {
+  background: radial-gradient(ellipse at center, rgba(255, 230, 109, 0.4), transparent 70%);
+  box-shadow: 0 0 20px rgba(255, 230, 109, 0.5);
+}
+
+.glow-bar__fill--boss {
+  background: linear-gradient(90deg, #ff0000, #ff4444);
+  color: #ff0000;
+}
+
+.glow-bar__glow--boss {
+  background: radial-gradient(ellipse at center, rgba(255, 0, 0, 0.4), transparent 70%);
+  box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+}
+
+.hud-timer.boss-fight {
+  color: #ff0000;
+  text-shadow: 0 0 10px #ff0000, 0 0 20px #ff0000;
+  animation: pulse-glow 1s ease-in-out infinite;
+  font-weight: bold;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.hud-level {
+  font-size: 1.4rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #84f0ff;
+}
+
+.hud-timer {
+  font-family: 'Orbitron', 'Rajdhani', monospace;
+  font-size: 1.2rem;
+  color: #ffe66d;
+}
+
+.canvas-wrap {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+  width: 100%;
+  margin-left: 0;
+}
