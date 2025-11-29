@@ -218,7 +218,17 @@ export class HighScoresScene extends Phaser.Scene {
     }
   }
 
-  fadeOut() {
+  async fadeOut() {
+    // Stop SID music before returning to title
+    const sidPlayer = window.sidSurfer?.sidPlayer ?? null
+    if (sidPlayer) {
+      try {
+        await sidPlayer.stop()
+      } catch (error) {
+        console.warn('[HighScoresScene] Failed to stop SID music', error)
+      }
+    }
+    
     this.tweens.add({
       targets: this.cameras.main,
       alpha: { from: 1, to: 0 },

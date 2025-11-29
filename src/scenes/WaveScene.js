@@ -47,7 +47,7 @@ export class WaveScene extends Phaser.Scene {
     this.bossSprite = null
     this.bossGlow = null
     this.bossHealth = 0
-    this.bossMaxHealth = 500
+    this.bossMaxHealth = 3000 // Much harder boss
     this.bossLane = 0
     this.bossX = 0
     this.bossFireCooldown = 0
@@ -70,6 +70,7 @@ export class WaveScene extends Phaser.Scene {
     this.load.image('powerup-rockets', '/sprites/rocket.png')
     this.load.image('powerup-shield', '/sprites/waveform.png')
     this.load.image('drone', '/sprites/drone.png')
+    this.load.image('boss', '/sprites/boss.png')
     
     // Load player spritesheet (256px frame size, 60 frames per direction, 2 rows)
     // Atlas: 256×60 = 15,360px wide, 256×2 = 512px tall
@@ -1571,6 +1572,7 @@ export class WaveScene extends Phaser.Scene {
     this.bossActive = true
     this.bossHealth = this.bossMaxHealth
     this.bossLane = this.currentLane
+    this.bossDroneCooldown = 0 // Initialize drone cooldown
     const { width, height } = this.scale
     this.bossX = -80
 
@@ -1588,11 +1590,19 @@ export class WaveScene extends Phaser.Scene {
     })
     this.placeholderPool = []
 
-    this.bossSprite = this.add.rectangle(this.bossX, height * 0.2 + this.bossLane * 80, 60, 60, 0xff0000, 1)
-    this.bossSprite.setStrokeStyle(3, 0xff4444, 1)
-    this.bossSprite.setBlendMode(Phaser.BlendModes.ADD)
+    // Use boss sprite image if available, otherwise fallback to rectangle
+    if (this.textures.exists('boss')) {
+      this.bossSprite = this.add.image(this.bossX, height * 0.2 + this.bossLane * 80, 'boss')
+      this.bossSprite.setDisplaySize(120, 120) // Make boss bigger
+      this.bossSprite.setOrigin(0.5, 0.5) // Ensure rotation is centered
+      // No red tint - use original sprite colors
+    } else {
+      this.bossSprite = this.add.rectangle(this.bossX, height * 0.2 + this.bossLane * 80, 120, 120, 0xff0000, 1)
+      this.bossSprite.setStrokeStyle(3, 0xff4444, 1)
+      this.bossSprite.setBlendMode(Phaser.BlendModes.ADD)
+    }
 
-    this.bossGlow = this.add.circle(this.bossX, height * 0.2 + this.bossLane * 80, 40, 0xff0000, 0.3)
+    this.bossGlow = this.add.circle(this.bossX, height * 0.2 + this.bossLane * 80, 80, 0xff0000, 0.3) // Bigger glow for bigger boss
     this.bossGlow.setBlendMode(Phaser.BlendModes.ADD)
 
     this.tweens.add({
@@ -1634,6 +1644,14 @@ export class WaveScene extends Phaser.Scene {
     const waveY = this.sampleWaveY(this.bossLane, this.bossX)
     const targetY = waveY
     this.bossSprite.y = Phaser.Math.Linear(this.bossSprite.y, targetY, 0.1)
+    
+    // Boss rotation - faster as health decreases
+    const healthPercent = this.bossHealth / this.bossMaxHealth
+    const baseRotationSpeed = 0.01 // Slow rotation at full health
+    const maxRotationSpeed = 0.08 // Fast rotation at low health
+    const rotationSpeed = baseRotationSpeed + (1 - healthPercent) * (maxRotationSpeed - baseRotationSpeed)
+    this.bossSprite.rotation += rotationSpeed * delta
+    
     if (this.bossGlow) {
       this.bossGlow.x = this.bossSprite.x
       this.bossGlow.y = this.bossSprite.y
@@ -1646,34 +1664,63 @@ export class WaveScene extends Phaser.Scene {
     }
 
     const bossHealthPercent = (this.bossHealth / this.bossMaxHealth) * 100
-    if (bossHealthPercent <= 25) {
+    if (bossHealthPercent <= 50) {
+      // Initialize cooldown if not set
+      if (this.bossDroneCooldown === undefined || this.bossDroneCooldown === null) {
+        this.bossDroneCooldown = 0
+      }
+      
       this.bossDroneCooldown -= delta
       if (this.bossDroneCooldown <= 0) {
+        console.log(`[Boss] Launching drone at ${bossHealthPercent.toFixed(1)}% health`)
         this.launchBossDrone()
-        this.bossDroneCooldown = Phaser.Math.Between(2000, 3500)
+        // More frequent drones in final phase
+        this.bossDroneCooldown = Phaser.Math.Between(1500, 2500)
       }
     }
 
     this.bossDrones = this.bossDrones.filter((drone) => {
-      if (!drone.sprite || drone.sprite.destroyed || !this.playerSprite) return false
+      if (!drone.sprite || drone.sprite.destroyed || !this.playerSprite) {
+        console.log('[Boss] Filtering out drone: sprite missing or destroyed')
+        return false
+      }
       
       const dx = this.playerSprite.x - drone.sprite.x
       const dy = this.playerSprite.y - drone.sprite.y
       const dist = Math.sqrt(dx * dx + dy * dy)
-      const angle = Math.atan2(dy, dx)
       
-      const homingSpeed = 0.15
-      drone.sprite.x += Math.cos(angle) * delta * drone.speed + dx * homingSpeed * delta
-      drone.sprite.y += Math.sin(angle) * delta * drone.speed + dy * homingSpeed * delta
+      // Normalize direction vector for consistent movement
+      const dirX = dx / dist
+      const dirY = dy / dist
+      
+      // Move towards player - drones should move RIGHT (positive X) to reach player
+      const moveSpeed = 0.2 // Speed towards player
+      drone.sprite.x += dirX * moveSpeed * delta
+      drone.sprite.y += dirY * moveSpeed * delta
+      
+      // Update drone rotation to face movement direction
+      const angle = Math.atan2(dy, dx)
+      drone.sprite.rotation = angle
+      
+      // Debug: log movement occasionally
+      if (Math.random() < 0.01) { // 1% chance per frame
+        console.log(`[Boss] Drone moving: dx=${dx.toFixed(1)}, dy=${dy.toFixed(1)}, dirX=${dirX.toFixed(2)}, speed=${(dirX * moveSpeed * delta).toFixed(3)}`)
+      }
       
       if (dist < 30) {
+        console.log('[Boss] Drone hit player at distance:', dist)
         this.createExplosion(drone.sprite.x, drone.sprite.y, 0xff6600)
         drone.sprite.destroy()
-        this.playerDamage(20)
+        // Skip drone damage if cheat is enabled
+        if (!this.enemyCollisionsDisabled) {
+          this.playerDamage(20)
+        }
         return false
       }
       
-      if (drone.sprite.x > width + 50 || drone.sprite.x < -50 || drone.sprite.y < -50 || drone.sprite.y > height + 50) {
+      // Only destroy if way off screen
+      if (drone.sprite.x > width + 100 || drone.sprite.x < -100 || drone.sprite.y < -100 || drone.sprite.y > height + 100) {
+        console.log('[Boss] Drone went off screen, destroying')
         drone.sprite.destroy()
         return false
       }
@@ -1705,11 +1752,13 @@ export class WaveScene extends Phaser.Scene {
     })
 
     for (const projectile of this.playerProjectiles) {
-      if (!projectile.sprite || projectile.sprite.x < this.bossX - 30 || projectile.sprite.x > this.bossX + 30) continue
-      if (!projectile.sprite || projectile.sprite.y < this.bossSprite.y - 30 || projectile.sprite.y > this.bossSprite.y + 30) continue
+      // Larger hitbox for bigger boss
+      if (!projectile.sprite || projectile.sprite.x < this.bossX - 60 || projectile.sprite.x > this.bossX + 60) continue
+      if (!projectile.sprite || projectile.sprite.y < this.bossSprite.y - 60 || projectile.sprite.y > this.bossSprite.y + 60) continue
       const dist = Phaser.Math.Distance.Between(projectile.sprite.x, projectile.sprite.y, this.bossSprite.x, this.bossSprite.y)
-      if (dist < 35) {
-        this.bossHealth -= projectile.damage
+      if (dist < 60) {
+        // Boss takes reduced damage to make it harder
+        this.bossHealth -= Math.max(1, Math.floor(projectile.damage * 0.5))
         projectile.sprite.destroy()
         if (projectile.glow) projectile.glow.destroy()
         if (projectile.outerGlow) projectile.outerGlow.destroy()
@@ -1752,6 +1801,9 @@ export class WaveScene extends Phaser.Scene {
   }
 
   tryBossProjectileHit(projectile) {
+    // Skip boss projectile hits if cheat is enabled
+    if (this.enemyCollisionsDisabled) return false
+    
     if (!this.playerSprite) return false
     const dist = Phaser.Math.Distance.Between(projectile.sprite.x, projectile.sprite.y, this.playerSprite.x, this.playerSprite.y)
     if (dist < 24) {
@@ -1762,12 +1814,31 @@ export class WaveScene extends Phaser.Scene {
   }
 
   launchBossDrone() {
-    if (!this.bossSprite || !this.playerSprite) return
-    const drone = this.add.image(this.bossSprite.x, this.bossSprite.y, 'drone')
-    drone.setDisplaySize(16, 16)
-    drone.setTint(0xff0000)
+    if (!this.bossSprite) {
+      console.warn('[Boss] Cannot launch drone: bossSprite missing')
+      return
+    }
+    if (!this.playerSprite) {
+      console.warn('[Boss] Cannot launch drone: playerSprite missing')
+      return
+    }
+    
+    console.log('[Boss] Launching drone from boss position:', this.bossSprite.x, this.bossSprite.y)
+    
+    // Use drone sprite if available, otherwise create a visible placeholder
+    let drone
+    if (this.textures.exists('drone')) {
+      drone = this.add.image(this.bossSprite.x, this.bossSprite.y, 'drone')
+      drone.setDisplaySize(32, 32) // Make drones bigger and more visible
+      console.log('[Boss] Using drone sprite image')
+    } else {
+      // Fallback: create a visible circle if drone sprite missing
+      drone = this.add.circle(this.bossSprite.x, this.bossSprite.y, 16, 0xff0000, 1)
+      console.log('[Boss] Using fallback circle for drone')
+    }
+    // No red tint - use original sprite colors
     drone.setBlendMode(Phaser.BlendModes.ADD)
-    drone.setAlpha(0.9)
+    drone.setAlpha(1.0) // Fully visible
     
     this.tweens.add({
       targets: drone,
@@ -1779,8 +1850,11 @@ export class WaveScene extends Phaser.Scene {
     
     this.bossDrones.push({
       sprite: drone,
-      speed: 0.12,
+      speed: 0.15, // Slightly faster base speed
     })
+    
+    console.log('[Boss] Drone launched, total drones:', this.bossDrones.length)
+    console.log('[Boss] Drone position:', drone.x, drone.y, 'Player position:', this.playerSprite.x, this.playerSprite.y)
   }
 
   createExplosion(x, y, color = 0xff6600, scale = 1.0) {
