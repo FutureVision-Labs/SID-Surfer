@@ -1,4 +1,4 @@
-const WEB_SID_BASE_PATH = '/libs/websid/'
+const WEB_SID_BASE_PATH = './libs/websid/'
 const WEB_SID_SCRIPTS = [
   `${WEB_SID_BASE_PATH}scriptprocessor_player.min.js`,
   `${WEB_SID_BASE_PATH}backend_tinyrsid.js`,

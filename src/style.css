@@ -170,5 +170,7 @@ body {
   overflow: hidden;
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
   width: 100%;
+  min-width: 1024px;
+  height: 800px;
   margin-left: 0;
 }

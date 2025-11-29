@@ -76,7 +76,7 @@ canvasContainer.className = 'canvas-wrap'
 canvasContainer.id = 'phaser-target'
 appContainer.appendChild(canvasContainer)
 
-const containerWidth = canvasContainer.clientWidth || window.innerWidth - 48
+const containerWidth = canvasContainer.clientWidth || window.innerWidth - 48 || 1024
 const containerHeight = 800
 
 const levelTitleEl = hud.querySelector('#level-title')
@@ -811,9 +811,21 @@ const config = {
   scene: [TitleScene, WaveScene, ComposerProfileScene, GameOverScene, NameEntryScene, HighScoresScene],
 }
 
-const game = new Phaser.Game(config)
-window.sidSurfer = {
-  game,
-  sidPlayer,
-  waveState,
+try {
+  const game = new Phaser.Game(config)
+  window.sidSurfer = {
+    game,
+    sidPlayer,
+    waveState,
+  }
+  console.log('[SID Surfer] Game initialized successfully')
+} catch (error) {
+  console.error('[SID Surfer] Failed to initialize game:', error)
+  document.querySelector('#app').innerHTML = `
+    <div style="color: #ff0000; padding: 2rem; text-align: center;">
+      <h1>Failed to load SID Surfer</h1>
+      <p>Error: ${error.message}</p>
+      <p>Check the browser console for details.</p>
+    </div>
+  `
 }
