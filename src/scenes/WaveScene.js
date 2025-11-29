@@ -9,7 +9,7 @@ const POWERUP_CONFIG = {
 }
 const WAVE_SCROLL_SPEED = 0.05
 const PLAYER_SPEED = 0.22
-const PLAYER_BOUNCE_AMPLITUDE = 20
+const PLAYER_BOUNCE_AMPLITUDE = 30 // Increased for more visible bounce
 const OBJECT_BOUNCE_AMPLITUDE = 24
 const PLAYER_LERP = 0.15
 const PLAYER_FIRE_DELAY = 350
@@ -26,8 +26,8 @@ export class WaveScene extends Phaser.Scene {
     this.placeholderPool = []
     this.playerSprite = null
     this.spawnTimer = null
-    this.comboText = null
     this.comboValue = 0
+    this.enemyCollisionsDisabled = false // Cheat flag
     this.playerX = 0
     this.playerBouncePhase = 0
     this.waveScroll = 0
@@ -55,6 +55,7 @@ export class WaveScene extends Phaser.Scene {
     this.bossProjectiles = []
     this.bossDrones = []
     this.explosions = []
+    this.playerFacingRight = true
     this.handleWavePlaylist = this.handleWavePlaylist.bind(this)
     this.handleLevelIntro = this.handleLevelIntro.bind(this)
     this.handleTrackAnnouncement = this.handleTrackAnnouncement.bind(this)
@@ -69,10 +70,27 @@ export class WaveScene extends Phaser.Scene {
     this.load.image('powerup-rockets', '/sprites/rocket.png')
     this.load.image('powerup-shield', '/sprites/waveform.png')
     this.load.image('drone', '/sprites/drone.png')
+    
+    // Load player spritesheet (256px frame size, 60 frames per direction, 2 rows)
+    // Atlas: 256×60 = 15,360px wide, 256×2 = 512px tall
+    // Each frame: 256×256px (fits within WebGL 16,384px limit)
+    this.load.spritesheet('player-sprite', '/sprites/player-spritesheet.png', {
+      frameWidth: 256,
+      frameHeight: 256,
+    })
   }
 
   create() {
     const { width, height } = this.scale
+
+    // Expose cheat to console
+    if (typeof window !== 'undefined') {
+      window.sidSurferCheats = window.sidSurferCheats || {}
+      window.sidSurferCheats.disableEnemyCollisions = (enabled = true) => {
+        this.enemyCollisionsDisabled = enabled
+        console.log(`[CHEAT] Enemy collisions ${enabled ? 'DISABLED' : 'ENABLED'}`)
+      }
+    }
 
     const hud = document.querySelector('.hud')
     if (hud) {
@@ -86,10 +104,14 @@ export class WaveScene extends Phaser.Scene {
 
     this.player = window.sidSurfer?.sidPlayer ?? null
 
-    this.playerSprite = this.add
-      .triangle(width * 0.8, height * 0.2, -18, 20, 18, 20, 0, -20, 0xfff6c2, 1)
-      .setStrokeStyle(2, 0xfff6c2, 0.9)
-    this.playerGlow = this.add.circle(width * 0.8, height * 0.2, 28, 0xfff6c2, 0.15)
+    // Create physics-based stickman surfer (reacts to wave physics!)
+    this.playerSprite = this.add.container(width * 0.8, height * 0.2)
+    this.playerFacingRight = true
+    this.playerGraphics = this.add.graphics()
+    this.playerSprite.add(this.playerGraphics)
+    
+    // Glow will be drawn as part of the stickman
+    this.playerGlow = null // No longer using separate glow circle
     this.playerX = width * 0.75
     this.playerProjectiles = []
     this.enemyProjectiles = []
@@ -112,13 +134,6 @@ export class WaveScene extends Phaser.Scene {
     ]
     this.trickAnimations = ['spin', 'flip', 'twist', 'barrel']
 
-    this.comboText = this.add
-      .text(width - 32, 32, 'Combo x1', {
-        fontFamily: 'monospace',
-        fontSize: '18px',
-        color: '#ffe66d',
-      })
-      .setOrigin(1, 0)
 
     this.cursors = this.input.keyboard.createCursorKeys()
     this.altKeys = this.input.keyboard.addKeys({
@@ -263,7 +278,7 @@ export class WaveScene extends Phaser.Scene {
     } else {
       this.comboValue = Math.max(1, this.comboValue - 1)
     }
-    this.comboText?.setText(`Combo x${this.comboValue}`)
+    // Combo text display removed - comboValue still used for scoring
   }
 
   incrementTrickMeter(delta) {
@@ -276,7 +291,6 @@ export class WaveScene extends Phaser.Scene {
     
     this.trickMeter = 0
     this.comboValue += 2
-    this.comboText?.setText(`Combo x${this.comboValue}`)
     this.playerScore += 100 * this.comboValue
     this.syncHudStatus()
     
@@ -294,7 +308,7 @@ export class WaveScene extends Phaser.Scene {
 
   executeTrickAnimation(type) {
     const baseDuration = 650
-    this.tweens.killTweensOf([this.playerSprite, this.playerGlow])
+    this.tweens.killTweensOf([this.playerSprite])
     
     switch (type) {
       case 'spin':
@@ -350,13 +364,7 @@ export class WaveScene extends Phaser.Scene {
         })
     }
     
-    this.tweens.add({
-      targets: this.playerGlow,
-      alpha: { from: 0.9, to: 0.15 },
-      scale: { from: 1, to: 1.5 },
-      duration: baseDuration,
-      yoyo: true,
-    })
+    // Glow is now part of stickman, no separate glow animation needed
   }
 
   updatePlayerOnWave(time, delta) {
@@ -365,6 +373,13 @@ export class WaveScene extends Phaser.Scene {
     let horizontalInput = 0
     if (this.cursors.left?.isDown || this.altKeys.left?.isDown) horizontalInput -= 1
     if (this.cursors.right?.isDown || this.altKeys.right?.isDown) horizontalInput += 1
+
+    // Update facing direction
+    if (horizontalInput > 0 && !this.playerFacingRight) {
+      this.playerFacingRight = true
+    } else if (horizontalInput < 0 && this.playerFacingRight) {
+      this.playerFacingRight = false
+    }
 
     this.playerX += horizontalInput * PLAYER_SPEED * delta
     this.playerX = Phaser.Math.Wrap(this.playerX, 0, width)
@@ -380,17 +395,367 @@ export class WaveScene extends Phaser.Scene {
     const waveInfo = this.getWaveInfo(this.currentLane, this.playerX) ?? fallbackInfo
     const waveY = waveInfo.y ?? fallbackInfo.y
     const slope = waveInfo.slope ?? 0
-    this.playerBouncePhase += delta * 0.008
+    this.playerBouncePhase += delta * 0.006 // Slightly slower for smoother bounce
     const bounce = Math.sin(this.playerBouncePhase) * PLAYER_BOUNCE_AMPLITUDE
     const targetY = waveY - 18 + bounce
 
-    const lerpedY = Phaser.Math.Linear(this.playerSprite.y, targetY, PLAYER_LERP)
+    // Apply bounce directly to avoid jerkiness from lerp fighting bounce
     this.playerSprite.x = this.playerX
-    this.playerSprite.y = lerpedY
-    this.playerSprite.rotation = Phaser.Math.Angle.Wrap(slope + Math.sin(this.playerBouncePhase) * 0.25)
-    this.playerGlow.x = this.playerX
-    this.playerGlow.y = Phaser.Math.Linear(this.playerGlow.y, lerpedY, PLAYER_LERP)
+    this.playerSprite.y = targetY // Use targetY directly for smoother bounce
+    
+    // Restore rotation with wave and bounce (more pronounced)
+    this.playerSprite.rotation = Phaser.Math.Angle.Wrap(slope + Math.sin(this.playerBouncePhase) * 0.3)
+    
+    // Draw stickman surfer that reacts to wave physics
+    this.drawStickmanSurfer(slope, horizontalInput, bounce, delta)
+    
+    // Glow is now part of stickman drawing
     this.incrementTrickMeter(delta)
+  }
+
+  drawStickmanSurfer(slope, horizontalInput, bounce, delta) {
+    if (!this.playerGraphics) return
+    
+    const g = this.playerGraphics
+    g.clear()
+    
+    // Colors
+    const bodyColor = 0xfff6c2
+    const glowColor = 0xfff6c2
+    const boardColor = 0x4ecdc4
+    const lineWidth = 3
+    const glowWidth = 5
+    
+    // Base position (center of stickman)
+    const centerX = 0
+    const centerY = 0
+    
+    // Smooth out reactions - reduce sensitivity
+    // Calculate body lean based on movement and wave slope (much more subtle)
+    const leanAngle = slope * 0.3 + (horizontalInput * 0.15) // Reduced sensitivity
+    const bodyAngle = leanAngle
+    
+    // Head (circle)
+    const headRadius = 8
+    const headY = centerY - 35
+    
+    // Body (from head to hips)
+    const bodyLength = 25
+    const hipY = centerY - 10
+    const hipX = centerX + Math.sin(bodyAngle) * (bodyLength * 0.2) // Reduced from 0.3
+    
+    // Shoulders (for arms) - positioned on the body, not right next to head
+    const shoulderY = centerY - 20 // Lower on body, between head and hips
+    const shoulderOffset = 10
+    const leftShoulderX = centerX - shoulderOffset * (this.playerFacingRight ? 1 : -1) + Math.sin(bodyAngle) * 3
+    const rightShoulderX = centerX + shoulderOffset * (this.playerFacingRight ? 1 : -1) + Math.sin(bodyAngle) * 3
+    
+    // Arms - horizontal surfing pose (outstretched to sides for balance)
+    const armLength = 20
+    const armSpread = Math.abs(horizontalInput) * 0.15 + Math.abs(slope) * 0.1
+    // Arms go out to sides (horizontal) - left points left, right points right
+    // In Phaser: 0 = right, Math.PI = left, Math.PI/2 = down, -Math.PI/2 = up
+    const leftArmAngle = Math.PI + bodyAngle * 0.2 - armSpread // Pointing left (180 degrees) with slight adjustments
+    const rightArmAngle = 0 + bodyAngle * 0.2 + armSpread // Pointing right (0 degrees) with slight adjustments
+    const leftArmEndX = leftShoulderX + Math.cos(leftArmAngle) * armLength
+    const leftArmEndY = shoulderY + Math.sin(leftArmAngle) * armLength
+    const rightArmEndX = rightShoulderX + Math.cos(rightArmAngle) * armLength
+    const rightArmEndY = shoulderY + Math.sin(rightArmAngle) * armLength
+    
+    // Hips (for legs)
+    const hipWidth = 14
+    const leftHipX = hipX - hipWidth / 2
+    const rightHipX = hipX + hipWidth / 2
+    
+    // Legs - much less aggressive bending, more stable
+    const legLength = 20
+    const kneeBend = Math.abs(slope) * 0.15 + Math.abs(bounce) * 0.05 // Reduced from 0.4/0.1 - much more subtle
+    // Add a base bend so legs aren't straight (more natural surfing stance)
+    const baseKneeBend = 0.2 // Slight natural bend
+    const leftKneeBend = baseKneeBend + (slope > 0 ? kneeBend : -kneeBend * 0.5)
+    const rightKneeBend = baseKneeBend - (slope > 0 ? kneeBend * 0.5 : -kneeBend)
+    
+    const leftKneeX = leftHipX + Math.sin(bodyAngle + leftKneeBend) * (legLength * 0.6)
+    const leftKneeY = hipY + Math.cos(bodyAngle + leftKneeBend) * (legLength * 0.6)
+    const rightKneeX = rightHipX + Math.sin(bodyAngle - rightKneeBend) * (legLength * 0.6)
+    const rightKneeY = hipY + Math.cos(bodyAngle - rightKneeBend) * (legLength * 0.6)
+    
+    // Feet (on board)
+    const footY = centerY + 8
+    const leftFootX = leftKneeX + Math.sin(bodyAngle + leftKneeBend) * (legLength * 0.4)
+    const rightFootX = rightKneeX + Math.sin(bodyAngle - rightKneeBend) * (legLength * 0.4)
+    
+    // Surfboard (under feet, rotated with wave)
+    const boardLength = 32
+    const boardY = footY + 4
+    const boardAngle = slope * 0.5 // Less board rotation
+    
+    // Draw surfboard first (behind stickman)
+    g.lineStyle(2, boardColor, 0.8)
+    g.beginPath()
+    const boardLeftX = centerX - boardLength / 2
+    const boardRightX = centerX + boardLength / 2
+    g.moveTo(boardLeftX, boardY)
+    g.lineTo(boardRightX, boardY)
+    g.strokePath()
+    
+    // Draw stickman with glow effect
+    // First draw glow layer (thicker, semi-transparent) - draw ALL parts with glow
+    g.lineStyle(glowWidth, glowColor, 0.5)
+    
+    // Glow head
+    g.fillStyle(glowColor, 0.4)
+    g.fillCircle(centerX, headY, headRadius + 2)
+    g.strokeCircle(centerX, headY, headRadius + 2)
+    
+    // Glow body - make sure lineStyle is set
+    g.lineStyle(glowWidth, glowColor, 0.5)
+    g.beginPath()
+    g.moveTo(centerX, headY + headRadius)
+    g.lineTo(hipX, hipY)
+    g.strokePath()
+    
+    // Glow left arm
+    g.lineStyle(glowWidth, glowColor, 0.5)
+    g.beginPath()
+    g.moveTo(leftShoulderX, shoulderY)
+    g.lineTo(leftArmEndX, leftArmEndY)
+    g.strokePath()
+    
+    // Glow right arm
+    g.lineStyle(glowWidth, glowColor, 0.5)
+    g.beginPath()
+    g.moveTo(rightShoulderX, shoulderY)
+    g.lineTo(rightArmEndX, rightArmEndY)
+    g.strokePath()
+    
+    // Glow left leg
+    g.lineStyle(glowWidth, glowColor, 0.5)
+    g.beginPath()
+    g.moveTo(leftHipX, hipY)
+    g.lineTo(leftKneeX, leftKneeY)
+    g.lineTo(leftFootX, footY)
+    g.strokePath()
+    
+    // Glow right leg
+    g.lineStyle(glowWidth, glowColor, 0.5)
+    g.beginPath()
+    g.moveTo(rightHipX, hipY)
+    g.lineTo(rightKneeX, rightKneeY)
+    g.lineTo(rightFootX, footY)
+    g.strokePath()
+    
+    // Now draw stickman on top (normal, solid)
+    g.lineStyle(lineWidth, bodyColor, 1)
+    
+    // Head
+    g.fillStyle(bodyColor, 1)
+    g.fillCircle(centerX, headY, headRadius)
+    g.lineStyle(lineWidth, bodyColor, 1)
+    g.strokeCircle(centerX, headY, headRadius)
+    
+    // Body
+    g.lineStyle(lineWidth, bodyColor, 1)
+    g.beginPath()
+    g.moveTo(centerX, headY + headRadius)
+    g.lineTo(hipX, hipY)
+    g.strokePath()
+    
+    // Left arm
+    g.beginPath()
+    g.moveTo(leftShoulderX, shoulderY)
+    g.lineTo(leftArmEndX, leftArmEndY)
+    g.strokePath()
+    
+    // Right arm
+    g.beginPath()
+    g.moveTo(rightShoulderX, shoulderY)
+    g.lineTo(rightArmEndX, rightArmEndY)
+    g.strokePath()
+    
+    // Left leg
+    g.beginPath()
+    g.moveTo(leftHipX, hipY)
+    g.lineTo(leftKneeX, leftKneeY)
+    g.lineTo(leftFootX, footY)
+    g.strokePath()
+    
+    // Right leg
+    g.beginPath()
+    g.moveTo(rightHipX, hipY)
+    g.lineTo(rightKneeX, rightKneeY)
+    g.lineTo(rightFootX, footY)
+    g.strokePath()
+  }
+
+  drawEnemyStickman(graphics, slope, bounce, type) {
+    if (!graphics) return
+    
+    const g = graphics
+    g.clear()
+    
+    // Colors based on enemy type
+    const bodyColor = type === 'ghost' ? 0x9be7ff : 0xff6b6b
+    const glowColor = type === 'ghost' ? 0x9be7ff : 0xff6b6b
+    const boardColor = type === 'ghost' ? 0x4ecdc4 : 0xff6b6b // Surfboard color
+    const lineWidth = 3 // Same as player
+    const glowWidth = 5 // Same as player
+    
+    // Base position (center of stickman) - SAME SIZE AS PLAYER
+    const centerX = 0
+    const centerY = 0
+    
+    // Body lean based on wave slope (same as player)
+    const leanAngle = slope * 0.3
+    const bodyAngle = leanAngle
+    
+    // Head (circle) - SAME SIZE AS PLAYER
+    const headRadius = 8
+    const headY = centerY - 35
+    
+    // Body (from head to hips) - SAME SIZE AS PLAYER
+    const bodyLength = 25
+    const hipY = centerY - 10
+    const hipX = centerX + Math.sin(bodyAngle) * (bodyLength * 0.2)
+    
+    // Shoulders - SAME SIZE AS PLAYER
+    const shoulderY = centerY - 20
+    const shoulderOffset = 10
+    const leftShoulderX = centerX - shoulderOffset + Math.sin(bodyAngle) * 3
+    const rightShoulderX = centerX + shoulderOffset + Math.sin(bodyAngle) * 3
+    
+    // Arms - pointing forward (enemies face left/toward player) - SAME SIZE AS PLAYER
+    const armLength = 20
+    const leftArmAngle = Math.PI * 0.75 + bodyAngle * 0.2 // Pointing forward-left
+    const rightArmAngle = Math.PI * 0.25 + bodyAngle * 0.2 // Pointing forward-right
+    const leftArmEndX = leftShoulderX + Math.cos(leftArmAngle) * armLength
+    const leftArmEndY = shoulderY + Math.sin(leftArmAngle) * armLength
+    const rightArmEndX = rightShoulderX + Math.cos(rightArmAngle) * armLength
+    const rightArmEndY = shoulderY + Math.sin(rightArmAngle) * armLength
+    
+    // Hips - SAME SIZE AS PLAYER
+    const hipWidth = 14
+    const leftHipX = hipX - hipWidth / 2
+    const rightHipX = hipX + hipWidth / 2
+    
+    // Legs - SAME SIZE AS PLAYER
+    const legLength = 20
+    const kneeBend = Math.abs(slope) * 0.15 + Math.abs(bounce) * 0.05
+    const baseKneeBend = 0.2
+    const leftKneeBend = baseKneeBend + (slope > 0 ? kneeBend : -kneeBend * 0.5)
+    const rightKneeBend = baseKneeBend - (slope > 0 ? kneeBend * 0.5 : -kneeBend)
+    
+    const leftKneeX = leftHipX + Math.sin(bodyAngle + leftKneeBend) * (legLength * 0.6)
+    const leftKneeY = hipY + Math.cos(bodyAngle + leftKneeBend) * (legLength * 0.6)
+    const rightKneeX = rightHipX + Math.sin(bodyAngle - rightKneeBend) * (legLength * 0.6)
+    const rightKneeY = hipY + Math.cos(bodyAngle - rightKneeBend) * (legLength * 0.6)
+    
+    // Feet (on board) - SAME SIZE AS PLAYER
+    const footY = centerY + 8
+    const leftFootX = leftKneeX + Math.sin(bodyAngle + leftKneeBend) * (legLength * 0.4)
+    const rightFootX = rightKneeX + Math.sin(bodyAngle - rightKneeBend) * (legLength * 0.4)
+    
+    // Surfboard (under feet, rotated with wave) - SAME SIZE AS PLAYER
+    const boardLength = 32
+    const boardY = footY + 4
+    const boardAngle = slope * 0.5
+    
+    // Draw surfboard first (behind stickman)
+    g.lineStyle(2, boardColor, type === 'ghost' ? 0.6 : 0.8)
+    g.beginPath()
+    const boardLeftX = centerX - boardLength / 2
+    const boardRightX = centerX + boardLength / 2
+    g.moveTo(boardLeftX, boardY)
+    g.lineTo(boardRightX, boardY)
+    g.strokePath()
+    
+    // Draw stickman with glow effect
+    // First draw glow layer (thicker, semi-transparent) - SAME AS PLAYER
+    g.lineStyle(glowWidth, glowColor, type === 'ghost' ? 0.3 : 0.5)
+    
+    // Glow head
+    g.fillStyle(glowColor, type === 'ghost' ? 0.2 : 0.4)
+    g.fillCircle(centerX, headY, headRadius + 2)
+    g.strokeCircle(centerX, headY, headRadius + 2)
+    
+    // Glow body
+    g.lineStyle(glowWidth, glowColor, type === 'ghost' ? 0.3 : 0.5)
+    g.beginPath()
+    g.moveTo(centerX, headY + headRadius)
+    g.lineTo(hipX, hipY)
+    g.strokePath()
+    
+    // Glow left arm
+    g.lineStyle(glowWidth, glowColor, type === 'ghost' ? 0.3 : 0.5)
+    g.beginPath()
+    g.moveTo(leftShoulderX, shoulderY)
+    g.lineTo(leftArmEndX, leftArmEndY)
+    g.strokePath()
+    
+    // Glow right arm
+    g.lineStyle(glowWidth, glowColor, type === 'ghost' ? 0.3 : 0.5)
+    g.beginPath()
+    g.moveTo(rightShoulderX, shoulderY)
+    g.lineTo(rightArmEndX, rightArmEndY)
+    g.strokePath()
+    
+    // Glow left leg
+    g.lineStyle(glowWidth, glowColor, type === 'ghost' ? 0.3 : 0.5)
+    g.beginPath()
+    g.moveTo(leftHipX, hipY)
+    g.lineTo(leftKneeX, leftKneeY)
+    g.lineTo(leftFootX, footY)
+    g.strokePath()
+    
+    // Glow right leg
+    g.lineStyle(glowWidth, glowColor, type === 'ghost' ? 0.3 : 0.5)
+    g.beginPath()
+    g.moveTo(rightHipX, hipY)
+    g.lineTo(rightKneeX, rightKneeY)
+    g.lineTo(rightFootX, footY)
+    g.strokePath()
+    
+    // Now draw stickman on top (normal, solid) - SAME AS PLAYER
+    g.lineStyle(lineWidth, bodyColor, type === 'ghost' ? 0.6 : 1)
+    
+    // Head
+    g.fillStyle(bodyColor, type === 'ghost' ? 0.5 : 1)
+    g.fillCircle(centerX, headY, headRadius)
+    g.lineStyle(lineWidth, bodyColor, type === 'ghost' ? 0.6 : 1)
+    g.strokeCircle(centerX, headY, headRadius)
+    
+    // Body
+    g.lineStyle(lineWidth, bodyColor, type === 'ghost' ? 0.6 : 1)
+    g.beginPath()
+    g.moveTo(centerX, headY + headRadius)
+    g.lineTo(hipX, hipY)
+    g.strokePath()
+    
+    // Left arm
+    g.beginPath()
+    g.moveTo(leftShoulderX, shoulderY)
+    g.lineTo(leftArmEndX, leftArmEndY)
+    g.strokePath()
+    
+    // Right arm
+    g.beginPath()
+    g.moveTo(rightShoulderX, shoulderY)
+    g.lineTo(rightArmEndX, rightArmEndY)
+    g.strokePath()
+    
+    // Left leg
+    g.beginPath()
+    g.moveTo(leftHipX, hipY)
+    g.lineTo(leftKneeX, leftKneeY)
+    g.lineTo(leftFootX, footY)
+    g.strokePath()
+    
+    // Right leg
+    g.beginPath()
+    g.moveTo(rightHipX, hipY)
+    g.lineTo(rightKneeX, rightKneeY)
+    g.lineTo(rightFootX, footY)
+    g.strokePath()
   }
 
   spawnInitialPlaceholders() {
@@ -407,6 +772,7 @@ export class WaveScene extends Phaser.Scene {
 
     let shape
     let powerupKind = null
+    let enemyGraphics = null
     if (type === 'powerup') {
       powerupKind = Phaser.Math.RND.pick(POWERUP_TYPES)
       const spriteKey = `powerup-${powerupKind}`
@@ -417,10 +783,11 @@ export class WaveScene extends Phaser.Scene {
       } else {
         shape = this.add.star(0, 0, 5, 8, 16, 0x4ecdc4, 1).setStrokeStyle(0)
       }
-    } else if (type === 'ghost') {
-      shape = this.add.rectangle(0, 0, 26, 48, 0x9be7ff, 0.5).setStrokeStyle(0)
     } else {
-      shape = this.add.triangle(0, 0, -16, 20, 16, 20, 0, -20, 0xff6b6b, 1).setStrokeStyle(0)
+      // Create container with graphics for enemy stickmen
+      shape = this.add.container(0, 0)
+      enemyGraphics = this.add.graphics()
+      shape.add(enemyGraphics)
     }
 
     const initialY = this.sampleWaveY(lane, startX)
@@ -435,6 +802,7 @@ export class WaveScene extends Phaser.Scene {
       fireElapsed: 0,
       health: type === 'powerup' ? 0 : type === 'ghost' ? 20 : 35,
       bouncePhase: Phaser.Math.FloatBetween(0, Math.PI * 2),
+      graphics: enemyGraphics, // Store graphics reference for stickman drawing
     }
     if (type === 'powerup') {
       entry.powerupKind = powerupKind
@@ -457,10 +825,21 @@ export class WaveScene extends Phaser.Scene {
       entry.sprite.x = entry.x
       entry.sprite.y = baseY + bounce
       entry.sprite.rotation = Phaser.Math.Angle.Wrap(slope + Math.sin(entry.bouncePhase) * 0.3)
+      
+      // Draw enemy stickman if it's an enemy type
+      if ((entry.type === 'ghost' || entry.type === 'obstacle') && entry.graphics) {
+        this.drawEnemyStickman(entry.graphics, slope, bounce, entry.type)
+      }
 
+      // Check collision - skip enemy collisions if cheat is enabled, but always allow powerup collisions
       if (entry.lane === this.currentLane && !entry.hit && Math.abs(entry.x - this.playerSprite.x) < 40) {
-        entry.hit = true
-        this.handlePlaceholderCollision(entry)
+        // Skip collision if it's an enemy type and collisions are disabled
+        if (this.enemyCollisionsDisabled && (entry.type === 'ghost' || entry.type === 'obstacle')) {
+          // Enemies pass through, but they can still be shot
+        } else {
+          entry.hit = true
+          this.handlePlaceholderCollision(entry)
+        }
       }
 
       if ((entry.type === 'obstacle' || entry.type === 'ghost') && !entry.hit) {
@@ -483,7 +862,6 @@ export class WaveScene extends Phaser.Scene {
   handlePlaceholderCollision(entry) {
     if (entry.type === 'powerup') {
       this.comboValue += 1
-      this.comboText?.setText(`Combo x${this.comboValue}`)
       this.playerScore += 50 * this.comboValue
       this.activatePowerup(entry.powerupKind ?? 'shield')
       this.destroyPlaceholder(entry, 0x4ecdc4)
@@ -493,14 +871,12 @@ export class WaveScene extends Phaser.Scene {
 
     if (entry.type === 'ghost') {
       this.comboValue = Math.max(1, this.comboValue - 1)
-      this.comboText?.setText(`Combo x${this.comboValue}`)
       this.playerDamage(12)
       this.destroyPlaceholder(entry, 0x9be7ff)
       return
     }
 
     this.comboValue = 1
-    this.comboText?.setText(`Combo x${this.comboValue}`)
     this.playerDamage(8)
     this.destroyPlaceholder(entry, 0xff6b6b)
   }
@@ -522,6 +898,11 @@ export class WaveScene extends Phaser.Scene {
   destroyPlaceholder(entry, flashColor = 0xff6b6b) {
     if (!entry || entry.destroyed) return
     entry.destroyed = true
+    // Clean up graphics if it exists
+    if (entry.graphics) {
+      entry.graphics.clear()
+      entry.graphics.destroy()
+    }
     entry.sprite?.destroy()
     if (flashColor) {
       this.addFlash(flashColor)
@@ -735,26 +1116,30 @@ export class WaveScene extends Phaser.Scene {
         const dy = targetY - projectile.sprite.y
         const dist = Math.sqrt(dx * dx + dy * dy)
         if (dist > 5) {
-          const angle = Math.atan2(dy, dx)
-          const baseSpeed = Math.abs(projectile.speed)
-          const homing = projectile.homingSpeed * delta
-          projectile.sprite.x += Math.cos(angle) * delta * baseSpeed + dx * homing
-          projectile.sprite.y += Math.sin(angle) * delta * baseSpeed + dy * homing
-          projectile.sprite.rotation = angle
+          // Smooth homing: rotate towards target with a turn rate, then move forward at constant speed.
+          const desired = Math.atan2(dy, dx)
+          const current = projectile.sprite.rotation || 0
+          const turnRate = 0.008 * delta // smaller = smoother
+          const newRot = Phaser.Math.Angle.RotateTo(current, desired, turnRate)
+          projectile.sprite.rotation = newRot
+
+          const speedMag = 0.22 // world units per ms
+          projectile.sprite.x += Math.cos(newRot) * speedMag * delta
+          projectile.sprite.y += Math.sin(newRot) * speedMag * delta
           if (projectile.glow) {
             projectile.glow.x = projectile.sprite.x
             projectile.glow.y = projectile.sprite.y
             projectile.glow.rotation = projectile.sprite.rotation
           }
           if (projectile.thrustFlame && projectile.thrustCore) {
-            const thrustOffsetX = Math.cos(angle + Math.PI) * 8
-            const thrustOffsetY = Math.sin(angle + Math.PI) * 8
+            const thrustOffsetX = Math.cos(projectile.sprite.rotation + Math.PI) * 8
+            const thrustOffsetY = Math.sin(projectile.sprite.rotation + Math.PI) * 8
             projectile.thrustFlame.x = projectile.sprite.x + thrustOffsetX
             projectile.thrustFlame.y = projectile.sprite.y + thrustOffsetY
-            projectile.thrustFlame.rotation = angle + Math.PI
+            projectile.thrustFlame.rotation = projectile.sprite.rotation + Math.PI
             projectile.thrustCore.x = projectile.sprite.x + thrustOffsetX
             projectile.thrustCore.y = projectile.sprite.y + thrustOffsetY
-            projectile.thrustCore.rotation = angle + Math.PI
+            projectile.thrustCore.rotation = projectile.sprite.rotation + Math.PI
           }
         } else {
           projectile.sprite.x += delta * projectile.speed
@@ -793,7 +1178,7 @@ export class WaveScene extends Phaser.Scene {
           projectile.thrustCore.y = projectile.sprite.y
           projectile.thrustCore.rotation = Math.PI
         }
-        if (projectile.isRocket && !projectile.target) {
+        if (projectile.isRocket && (!projectile.target || projectile.target.destroyed)) {
           projectile.target = this.findNearestEnemy(projectile.sprite.x, projectile.sprite.y)
         }
       }
@@ -851,7 +1236,6 @@ export class WaveScene extends Phaser.Scene {
           const baseScore = entry.type === 'ghost' ? 75 : 100
           this.playerScore += baseScore * this.comboValue
           this.comboValue += 1
-          this.comboText?.setText(`Combo x${this.comboValue}`)
           this.createExplosion(entry.sprite.x, entry.sprite.y, 0x84f0ff)
           this.destroyPlaceholder(entry, 0x84f0ff)
           this.syncHudStatus()
@@ -863,6 +1247,9 @@ export class WaveScene extends Phaser.Scene {
   }
 
   tryEnemyProjectileHit(projectile) {
+    // Skip enemy projectile hits if cheat is enabled
+    if (this.enemyCollisionsDisabled) return false
+    
     if (!this.playerSprite) return false
     const dist = Phaser.Math.Distance.Between(projectile.sprite.x, projectile.sprite.y, this.playerSprite.x, this.playerSprite.y)
     if (dist < 24) {

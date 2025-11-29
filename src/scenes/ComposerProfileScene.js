@@ -60,13 +60,13 @@ export class ComposerProfileScene extends Phaser.Scene {
     }
     
     // Load dancing sprite animations
-    // Will try to load dance-01 through dance-05 as spritesheets
+    // Dancer sprites: 256px per frame, 48 frames
     // If they don't exist, will gracefully use placeholder
     for (let i = 1; i <= 5; i++) {
-      // Try loading as spritesheet first (most common format)
-      this.load.spritesheet(`dance-${i}`, `/sprites/dance-${i}.png`, {
-        frameWidth: 128,
-        frameHeight: 128,
+      const danceKey = `dance0${i}` // dance01, dance02, etc.
+      this.load.spritesheet(danceKey, `/sprites/dance0${i}.png`, {
+        frameWidth: 256,
+        frameHeight: 256
       })
     }
   }
@@ -189,45 +189,48 @@ export class ComposerProfileScene extends Phaser.Scene {
     // Try to find available dance animations
     const availableDances = []
     for (let i = 1; i <= 5; i++) {
-      if (this.textures.exists(`dance-${i}`)) {
-        availableDances.push(`dance-${i}`)
+      const danceKey = `dance0${i}` // dance01, dance02, etc.
+      if (this.textures.exists(danceKey)) {
+        availableDances.push(danceKey)
       }
     }
     
     if (availableDances.length > 0) {
       // Pick random dance animation
       const randomDance = Phaser.Utils.Array.GetRandom(availableDances)
+      const texture = this.textures.get(randomDance)
+      // Phaser detects 49 frames but frame 48 doesn't exist, so use frameTotal - 2 for 48 frames (0-47)
+      const endFrame = texture && texture.frameTotal > 2 ? texture.frameTotal - 2 : (texture && texture.frameTotal > 1 ? texture.frameTotal - 1 : 0)
+      const animKey = `${randomDance}-dance`
+      
       const danceSprite = this.add.sprite(danceX, danceY, randomDance)
       danceSprite.setDisplaySize(danceSize, danceSize)
       danceSprite.setAlpha(0)
       danceSprite.setDepth(5)
       
-      // Check if it's a spritesheet - if so, create and play animation
-      const texture = this.textures.get(randomDance)
-      if (texture && texture.frameTotal > 1) {
-        // It's a spritesheet - create animation
-        const animKey = `${randomDance}-dance`
+      // Create and play animation if available
+      if (endFrame > 0) {
         if (!this.anims.exists(animKey)) {
           this.anims.create({
             key: animKey,
-            frames: this.anims.generateFrameNumbers(randomDance, { start: 0, end: texture.frameTotal - 1 }),
+            frames: this.anims.generateFrameNumbers(randomDance, { start: 0, end: endFrame }),
             frameRate: 10,
             repeat: -1,
           })
         }
         danceSprite.play(animKey)
-      } else {
-        // Single image - add bobbing animation
-        this.tweens.add({
-          targets: danceSprite,
-          scale: { from: 0.9, to: 1.1 },
-          rotation: { from: -0.1, to: 0.1 },
-          duration: 800,
-          ease: 'Sine.InOut',
-          yoyo: true,
-          repeat: -1,
-        })
       }
+      
+      // Add bobbing animation
+      this.tweens.add({
+        targets: danceSprite,
+        scale: { from: 0.9, to: 1.1 },
+        rotation: { from: -0.1, to: 0.1 },
+        duration: 800,
+        ease: 'Sine.InOut',
+        yoyo: true,
+        repeat: -1,
+      })
       
       // Add glow effect
       const danceGlow = this.add.circle(danceX, danceY, danceSize * 0.6, 0x7f5af0, 0.3)
@@ -417,7 +420,10 @@ export class ComposerProfileScene extends Phaser.Scene {
           waveState.composerName = firstComposer?.name ?? 'Wave Set'
           waveState.composerId = firstComposer?.id ?? null
           window.pushWaveState()
-          this.scene.launch('WaveScene')
+          // Start WaveScene and ensure it's ready before starting music
+          this.scene.start('WaveScene')
+          // Small delay to ensure scene is fully created before starting music
+          await new Promise(resolve => setTimeout(resolve, 100))
           await window.startComposerLevel(0, true)
         } else if (this.composerData) {
           this.scene.get('WaveScene').events.emit('composer-profile-complete')

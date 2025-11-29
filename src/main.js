@@ -7,7 +7,7 @@ import { GameOverScene } from './scenes/GameOverScene.js'
 import { HighScoresScene } from './scenes/HighScoresScene.js'
 import { NameEntryScene } from './scenes/NameEntryScene.js'
 
-const LEVEL_DURATION_MS = 5 * 60 * 1000
+const LEVEL_DURATION_MS = 2 * 60 * 1000
 const LEVEL_PREFIXES = ['LEVEL ONE', 'LEVEL TWO', 'LEVEL THREE', 'LEVEL FOUR', 'LEVEL FIVE']
 const AUDIO_CUE_PATHS = {
   powerupShield: '/audio/cues/powerup-shield.mp3',
@@ -160,7 +160,12 @@ function getAudioElement(name) {
   }
   if (!audioCueCache[name]) {
     const audio = new Audio(AUDIO_CUE_PATHS[name])
-    audio.volume = 0.8
+    // Reduce volume - player-fire is especially loud
+    if (name === 'playerFire') {
+      audio.volume = 0.15 // Much quieter for laser SFX
+    } else {
+      audio.volume = 0.5 // Reduced from 0.8 for other cues
+    }
     audioCueCache[name] = audio
   }
   return audioCueCache[name]
@@ -313,9 +318,23 @@ class TitleScene extends Phaser.Scene {
 
   preload() {
     // Title assets (text-only logo; optional dancer sheets)
+    // Dancer sprites: 256px per frame, 48 frames
     for (let i = 1; i <= 5; i++) {
-      this.load.spritesheet(`dance-${i}`, `/sprites/dance-${i}.png`, { frameWidth: 128, frameHeight: 128 })
+      const danceKey = `dance0${i}` // dance01, dance02, etc.
+      this.load.spritesheet(danceKey, `/sprites/dance0${i}.png`, { 
+        frameWidth: 256, 
+        frameHeight: 256
+      })
     }
+    // Load the 8 circular emblem logos
+    this.load.image('logo-1', '/logos/SID Surfer Logo 1.jpg')
+    this.load.image('logo-2', '/logos/SID Surfer Logo 2.jpg')
+    this.load.image('logo-3', '/logos/SID Surfer Logo 3.jpg')
+    this.load.image('logo-4', '/logos/SID Surfer Logo 4.jpg')
+    this.load.image('logo-5', '/logos/SID Surfer Logo 5.jpg')
+    this.load.image('logo-8', '/logos/SID Surfer Logo 8.jpg')
+    this.load.image('logo-9', '/logos/SID Surfer Logo 9.jpg')
+    this.load.image('logo-10', '/logos/SID Surfer Logo 10.jpg')
     this.load.audio('theme1', '/audio/theme01.mp3')
     this.load.audio('theme2', '/audio/theme02.mp3')
     this.load.audio('theme3', '/audio/theme03.mp3')
@@ -344,44 +363,58 @@ class TitleScene extends Phaser.Scene {
     scan.fillStyle(0x000000, 0.08)
     for (let y = 0; y < height; y += 4) scan.fillRect(0, y, width, 2)
 
-    // Neon text logo
-    const logoText = this.add
-      .text(width / 2, height * 0.30, 'SID SURFER', {
-        fontFamily: 'Orbitron, Rajdhani, monospace',
-        fontSize: '84px',
-        color: '#7f5af0',
+    // Rotating logo carousel with 8 circular emblems
+    const logoKeys = ['logo-1', 'logo-2', 'logo-3', 'logo-4', 'logo-5', 'logo-8', 'logo-9', 'logo-10']
+    // Shuffle the logo keys for random display order
+    const shuffledKeys = Phaser.Utils.Array.Shuffle([...logoKeys])
+    const logoX = width / 2
+    const logoY = height * 0.15 // Moved to top to avoid overlapping other elements
+    this.logoScale = 0.25 // Much smaller logo for better title screen layout
+    
+    // Create logo sprites (all at same position, we'll fade between them)
+    this.logoSprites = []
+    shuffledKeys.forEach((key, index) => {
+      if (this.textures.exists(key)) {
+        const sprite = this.add.image(logoX, logoY, key)
+        sprite.setScale(this.logoScale)
+        sprite.setOrigin(0.5)
+        sprite.setAlpha(index === 0 ? 1 : 0) // Only first one visible
+        sprite.setDepth(10)
+        this.logoSprites.push(sprite)
+      }
+    })
+    
+    // Current logo index
+    this.currentLogoIndex = 0
+    this.logoRotationTimer = null
+    this.logoPulseTween = null
+    
+    // Start logo rotation
+    if (this.logoSprites.length > 0) {
+      this.startLogoRotation()
+      
+      // Continuous pulse effect on active logo
+      this.logoPulseTween = this.tweens.add({
+        targets: this.logoSprites[0],
+        scale: { from: this.logoScale * 0.98, to: this.logoScale * 1.05 },
+        duration: 2000,
+        ease: 'Sine.InOut',
+        yoyo: true,
+        repeat: -1,
       })
-      .setOrigin(0.5)
-    logoText.setStroke('#4ecdc4', 6).setShadow(0, 0, 28, '#4ecdc4', 1, true)
-    const logoGlow = this.add
-      .text(width / 2, height * 0.30, 'SID SURFER', {
-        fontFamily: 'Orbitron, Rajdhani, monospace',
-        fontSize: '84px',
-        color: '#7f5af0',
-      })
-      .setOrigin(0.5)
-      .setAlpha(0.35)
-      .setBlendMode(Phaser.BlendModes.ADD)
+    }
 
-    // Byline
+    // Byline - aligned with horizontal line in credits panel
+    // Calculate position to align with barA (panelY - panelH * 0.35)
+    const bylineY = (height * 0.60) - (Math.min(320, height * 0.65) * 0.35)
     const byline = this.add
-      .text(width / 2, height * 0.44, 'BY FUTUREVISION LABS', {
+      .text(width / 2, bylineY, 'BY FUTUREVISION LABS', {
         fontFamily: 'Orbitron, Rajdhani, monospace',
         fontSize: '18px',
-        color: '#84f0ff',
+        color: '#bcd7ff', // Brighter color to match credits text
       })
       .setOrigin(0.5)
     byline.setShadow(0, 0, 12, '#7f5af0', 1, true)
-
-    // Idle pulse
-    this.tweens.add({
-      targets: [logoText, logoGlow],
-      scale: { from: 0.98, to: 1.02 },
-      duration: 1400,
-      ease: 'Sine.InOut',
-      yoyo: true,
-      repeat: -1,
-    })
 
     this.themeTracks = ['theme1', 'theme2', 'theme3', 'theme4', 'theme5']
     this.currentThemeIndex = -1
@@ -498,24 +531,41 @@ class TitleScene extends Phaser.Scene {
     const dancerSize = Math.min(240, Math.min(width, height) * 0.28)
     const danceKeys = []
     for (let i = 1; i <= 5; i++) {
-      if (this.textures.exists(`dance-${i}`)) danceKeys.push(`dance-${i}`)
+      const danceKey = `dance0${i}` // dance01, dance02, etc.
+      if (this.textures.exists(danceKey)) danceKeys.push(danceKey)
     }
     if (danceKeys.length) {
       const key = Phaser.Utils.Array.GetRandom(danceKeys)
       const tex = this.textures.get(key)
-      const frames = tex.frameTotal > 1 ? tex.frameTotal - 1 : 0
-      const animKey = `${key}-dance`
-      if (frames > 0 && !this.anims.exists(animKey)) {
-        this.anims.create({
-          key: animKey,
-          frames: this.anims.generateFrameNumbers(key, { start: 0, end: frames }),
-          frameRate: 10,
-          repeat: -1,
-        })
+      if (!tex || !tex.source[0] || !tex.source[0].image) {
+        console.error(`[TitleScene] Texture ${key} not ready`)
+        return
       }
+      
+      // Phaser detects 49 frames but frame 48 doesn't exist, so use frameTotal - 2 for 48 frames (0-47)
+      const endFrame = tex.frameTotal > 2 ? tex.frameTotal - 2 : (tex.frameTotal > 1 ? tex.frameTotal - 1 : 0)
+      const animKey = `${key}-dance`
+      
+      // Create sprite first
       const dancer = this.add.sprite(dancerX, dancerY, key)
-      dancer.setDisplaySize(dancerSize, dancerSize).setAlpha(0.0).setDepth(5)
-      if (frames > 0) dancer.play(animKey)
+      dancer.setFrame(0) // Force set to frame 0
+      dancer.setDisplaySize(dancerSize, dancerSize)
+      dancer.setDepth(5)
+      dancer.setVisible(true)
+      dancer.clearTint()
+      
+      // Create and play animation
+      if (endFrame > 0) {
+        if (!this.anims.exists(animKey)) {
+          this.anims.create({
+            key: animKey,
+            frames: this.anims.generateFrameNumbers(key, { start: 0, end: endFrame }),
+            frameRate: 10,
+            repeat: -1,
+          })
+        }
+        dancer.play(animKey)
+      }
       this.tweens.add({
         targets: dancer,
         y: { from: dancerY - 8, to: dancerY + 8 },
@@ -535,6 +585,15 @@ class TitleScene extends Phaser.Scene {
         alpha: { from: 0, to: 1 },
         duration: 700,
         ease: 'Quad.Out',
+      })
+      this.tweens.add({
+        targets: glow,
+        alpha: { from: 0.22, to: 0.38 },
+        scale: { from: 0.96, to: 1.06 },
+        duration: 1500,
+        ease: 'Sine.InOut',
+        yoyo: true,
+        repeat: -1,
       })
       this.tweens.add({
         targets: glow,
@@ -596,6 +655,66 @@ class TitleScene extends Phaser.Scene {
       duration: 800,
       ease: 'Quad.Out',
     })
+  }
+
+  startLogoRotation() {
+    if (!this.logoSprites || this.logoSprites.length < 2) return
+    
+    const rotateToNext = () => {
+      const currentSprite = this.logoSprites[this.currentLogoIndex]
+      // Pick a random different logo (not the current one)
+      let nextIndex
+      do {
+        nextIndex = Phaser.Math.Between(0, this.logoSprites.length - 1)
+      } while (nextIndex === this.currentLogoIndex && this.logoSprites.length > 1)
+      const nextSprite = this.logoSprites[nextIndex]
+      
+      // Fade out current logo
+      this.tweens.add({
+        targets: currentSprite,
+        alpha: { from: 1, to: 0 },
+        duration: 800,
+        ease: 'Quad.InOut',
+      })
+      
+      // Fade in next logo
+      nextSprite.setAlpha(0)
+      this.tweens.add({
+        targets: nextSprite,
+        alpha: { from: 0, to: 1 },
+        duration: 800,
+        ease: 'Quad.InOut',
+      })
+      
+      // Update pulse tween to new sprite
+      if (this.logoPulseTween) {
+        this.logoPulseTween.stop()
+      }
+      this.logoPulseTween = this.tweens.add({
+        targets: nextSprite,
+        scale: { from: this.logoScale * 0.98, to: this.logoScale * 1.05 },
+        duration: 2000,
+        ease: 'Sine.InOut',
+        yoyo: true,
+        repeat: -1,
+      })
+      
+      this.currentLogoIndex = nextIndex
+    }
+    
+    // Rotate at random intervals between 2 and 3.5 seconds
+    const scheduleNextRotation = () => {
+      const delay = Phaser.Math.Between(2000, 3500)
+      this.logoRotationTimer = this.time.addEvent({
+        delay: delay,
+        callback: () => {
+          rotateToNext()
+          scheduleNextRotation() // Schedule the next random rotation
+        },
+        loop: false,
+      })
+    }
+    scheduleNextRotation()
   }
 
   playNextTheme() {
@@ -671,6 +790,14 @@ class TitleScene extends Phaser.Scene {
       this.themeSound.stop()
       this.themeSound.destroy()
       this.themeSound = null
+    }
+    if (this.logoRotationTimer) {
+      this.logoRotationTimer.destroy()
+      this.logoRotationTimer = null
+    }
+    if (this.logoPulseTween) {
+      this.logoPulseTween.stop()
+      this.logoPulseTween = null
     }
   }
 }
