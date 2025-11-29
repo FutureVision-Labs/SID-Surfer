@@ -7,35 +7,35 @@
         {
           "name": "After 8",
           "author": "Rob Hubbard",
-          "path": "/sid/hubbard/track01.sid",
+          "path": "./sid/hubbard/track01.sid",
           "subsong": 0,
           "year": 2018
         },
         {
           "name": "Arcade Classics",
           "author": "Rob Hubbard",
-          "path": "/sid/hubbard/track02.sid",
+          "path": "./sid/hubbard/track02.sid",
           "subsong": 0,
           "year": 1987
         },
         {
           "name": "Auf Wiedersehen Monty",
           "author": "Rob Hubbard",
-          "path": "/sid/hubbard/track03.sid",
+          "path": "./sid/hubbard/track03.sid",
           "subsong": 0,
           "year": 1987
         },
         {
           "name": "Casio Extended",
           "author": "Rob Hubbard",
-          "path": "/sid/hubbard/track04.sid",
+          "path": "./sid/hubbard/track04.sid",
           "subsong": 0,
           "year": 2018
         },
         {
           "name": "Chain Reaction",
           "author": "Rob Hubbard",
-          "path": "/sid/hubbard/track05.sid",
+          "path": "./sid/hubbard/track05.sid",
           "subsong": 0,
           "year": 1987
         }
@@ -48,35 +48,35 @@
         {
           "name": "720 Degrees",
           "author": "Ben Daglish",
-          "path": "/sid/daglish/track01.sid",
+          "path": "./sid/daglish/track01.sid",
           "subsong": 0,
           "year": 1987
         },
         {
           "name": "Black Thunder",
           "author": "Ben Daglish",
-          "path": "/sid/daglish/track02.sid",
+          "path": "./sid/daglish/track02.sid",
           "subsong": 0,
           "year": 1985
         },
         {
           "name": "Blood Valley",
           "author": "Ben Daglish",
-          "path": "/sid/daglish/track03.sid",
+          "path": "./sid/daglish/track03.sid",
           "subsong": 0,
           "year": 1988
         },
         {
           "name": "Bobby Bearing",
           "author": "Ben Daglish",
-          "path": "/sid/daglish/track04.sid",
+          "path": "./sid/daglish/track04.sid",
           "subsong": 0,
           "year": 1986
         },
         {
           "name": "Challenge of the Gobots",
           "author": "Ben Daglish",
-          "path": "/sid/daglish/track05.sid",
+          "path": "./sid/daglish/track05.sid",
           "subsong": 0,
           "year": 1987
         }
@@ -89,35 +89,35 @@
         {
           "name": "",
           "author": "Martin Galway",
-          "path": "/sid/galway/track01.sid",
+          "path": "./sid/galway/track01.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Martin Galway",
-          "path": "/sid/galway/track02.sid",
+          "path": "./sid/galway/track02.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Martin Galway",
-          "path": "/sid/galway/track03.sid",
+          "path": "./sid/galway/track03.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Martin Galway",
-          "path": "/sid/galway/track04.sid",
+          "path": "./sid/galway/track04.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Martin Galway",
-          "path": "/sid/galway/track05.sid",
+          "path": "./sid/galway/track05.sid",
           "subsong": 0,
           "year": 0
         }
@@ -130,35 +130,35 @@
         {
           "name": "",
           "author": "Tim & Geoff Follin",
-          "path": "/sid/follin/track01.sid",
+          "path": "./sid/follin/track01.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Tim & Geoff Follin",
-          "path": "/sid/follin/track02.sid",
+          "path": "./sid/follin/track02.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Tim & Geoff Follin",
-          "path": "/sid/follin/track03.sid",
+          "path": "./sid/follin/track03.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Tim & Geoff Follin",
-          "path": "/sid/follin/track04.sid",
+          "path": "./sid/follin/track04.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Tim & Geoff Follin",
-          "path": "/sid/follin/track05.sid",
+          "path": "./sid/follin/track05.sid",
           "subsong": 0,
           "year": 0
         }
@@ -171,35 +171,35 @@
         {
           "name": "",
           "author": "Sensible Software",
-          "path": "/sid/sensible/track01.sid",
+          "path": "./sid/sensible/track01.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Sensible Software",
-          "path": "/sid/sensible/track02.sid",
+          "path": "./sid/sensible/track02.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Sensible Software",
-          "path": "/sid/sensible/track03.sid",
+          "path": "./sid/sensible/track03.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Sensible Software",
-          "path": "/sid/sensible/track04.sid",
+          "path": "./sid/sensible/track04.sid",
           "subsong": 0,
           "year": 0
         },
         {
           "name": "",
           "author": "Sensible Software",
-          "path": "/sid/sensible/track05.sid",
+          "path": "./sid/sensible/track05.sid",
           "subsong": 0,
           "year": 0
         }

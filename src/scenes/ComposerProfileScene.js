@@ -56,7 +56,7 @@ export class ComposerProfileScene extends Phaser.Scene {
 
   preload() {
     if (this.composerId) {
-      this.load.image(`poster-${this.composerId}`, `/posters/${this.composerId}.png`)
+      this.load.image(`poster-${this.composerId}`, `./posters/${this.composerId}.png`)
     }
     
     // Load dancing sprite animations
@@ -64,7 +64,7 @@ export class ComposerProfileScene extends Phaser.Scene {
     // If they don't exist, will gracefully use placeholder
     for (let i = 1; i <= 5; i++) {
       const danceKey = `dance0${i}` // dance01, dance02, etc.
-      this.load.spritesheet(danceKey, `/sprites/dance0${i}.png`, {
+      this.load.spritesheet(danceKey, `./sprites/dance0${i}.png`, {
         frameWidth: 256,
         frameHeight: 256
       })

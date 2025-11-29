@@ -16,7 +16,7 @@ export class WebSIDController {
 
       window.ScriptNodePlayer?.createInstance(
         adapter,
-        '/',
+        './',
         [],
         false,
         () => {
@@ -44,7 +44,7 @@ export class WebSIDController {
     if (!this.player) return
 
     const options = {
-      basePath: '/',
+      basePath: './',
       track: typeof track.subsong === 'number' ? track.subsong : -1,
     }
 

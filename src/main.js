@@ -10,27 +10,27 @@ import { NameEntryScene } from './scenes/NameEntryScene.js'
 const LEVEL_DURATION_MS = 2 * 60 * 1000
 const LEVEL_PREFIXES = ['LEVEL ONE', 'LEVEL TWO', 'LEVEL THREE', 'LEVEL FOUR', 'LEVEL FIVE']
 const AUDIO_CUE_PATHS = {
-  powerupShield: '/audio/cues/powerup-shield.mp3',
-  powerupRockets: '/audio/cues/powerup-rockets.mp3',
-  powerupHeal: '/audio/cues/powerup-heal.mp3',
-  playerFire: '/audio/cues/player-fire.mp3',
-  enemyFire: '/audio/cues/enemy-fire.mp3',
-  hit: '/audio/cues/hit.mp3',
-  explosion: '/audio/cues/explosion.mp3',
-  trick1: '/audio/cues/trick-1.mp3',
-  trick2: '/audio/cues/trick-2.mp3',
-  trick3: '/audio/cues/trick-3.mp3',
-  trickRadical: '/audio/cues/trick-radical.mp3',
-  trickAwesomesauce: '/audio/cues/trick-awesomesauce.mp3',
-  trickAmazeballs: '/audio/cues/trick-amazeballs.mp3',
-  trickBogus: '/audio/cues/trick-bogus.mp3',
-  trickBoogie: '/audio/cues/trick-boogie.mp3',
-  trickYeah: '/audio/cues/trick-yeah.mp3',
-  theme1: '/audio/theme01.mp3',
-  theme2: '/audio/theme02.mp3',
-  theme3: '/audio/theme03.mp3',
-  theme4: '/audio/theme04.mp3',
-  theme5: '/audio/theme05.mp3',
+  powerupShield: './audio/cues/powerup-shield.mp3',
+  powerupRockets: './audio/cues/powerup-rockets.mp3',
+  powerupHeal: './audio/cues/powerup-heal.mp3',
+  playerFire: './audio/cues/player-fire.mp3',
+  enemyFire: './audio/cues/enemy-fire.mp3',
+  hit: './audio/cues/hit.mp3',
+  explosion: './audio/cues/explosion.mp3',
+  trick1: './audio/cues/trick-1.mp3',
+  trick2: './audio/cues/trick-2.mp3',
+  trick3: './audio/cues/trick-3.mp3',
+  trickRadical: './audio/cues/trick-radical.mp3',
+  trickAwesomesauce: './audio/cues/trick-awesomesauce.mp3',
+  trickAmazeballs: './audio/cues/trick-amazeballs.mp3',
+  trickBogus: './audio/cues/trick-bogus.mp3',
+  trickBoogie: './audio/cues/trick-boogie.mp3',
+  trickYeah: './audio/cues/trick-yeah.mp3',
+  theme1: './audio/theme01.mp3',
+  theme2: './audio/theme02.mp3',
+  theme3: './audio/theme03.mp3',
+  theme4: './audio/theme04.mp3',
+  theme5: './audio/theme05.mp3',
 }
 const audioCueCache = {}
 
@@ -188,7 +188,7 @@ window.sidSurferAudio = {
 
 async function loadManifest() {
   try {
-    const response = await fetch('/sid/manifest.json')
+    const response = await fetch('./sid/manifest.json')
     const json = await response.json()
     composerManifest = json.composers ?? []
     manifestLoaded = true
@@ -321,25 +321,25 @@ class TitleScene extends Phaser.Scene {
     // Dancer sprites: 256px per frame, 48 frames
     for (let i = 1; i <= 5; i++) {
       const danceKey = `dance0${i}` // dance01, dance02, etc.
-      this.load.spritesheet(danceKey, `/sprites/dance0${i}.png`, { 
+      this.load.spritesheet(danceKey, `./sprites/dance0${i}.png`, { 
         frameWidth: 256, 
         frameHeight: 256
       })
     }
     // Load the 8 circular emblem logos
-    this.load.image('logo-1', '/logos/SID Surfer Logo 1.jpg')
-    this.load.image('logo-2', '/logos/SID Surfer Logo 2.jpg')
-    this.load.image('logo-3', '/logos/SID Surfer Logo 3.jpg')
-    this.load.image('logo-4', '/logos/SID Surfer Logo 4.jpg')
-    this.load.image('logo-5', '/logos/SID Surfer Logo 5.jpg')
-    this.load.image('logo-8', '/logos/SID Surfer Logo 8.jpg')
-    this.load.image('logo-9', '/logos/SID Surfer Logo 9.jpg')
-    this.load.image('logo-10', '/logos/SID Surfer Logo 10.jpg')
-    this.load.audio('theme1', '/audio/theme01.mp3')
-    this.load.audio('theme2', '/audio/theme02.mp3')
-    this.load.audio('theme3', '/audio/theme03.mp3')
-    this.load.audio('theme4', '/audio/theme04.mp3')
-    this.load.audio('theme5', '/audio/theme05.mp3')
+    this.load.image('logo-1', './logos/SID Surfer Logo 1.jpg')
+    this.load.image('logo-2', './logos/SID Surfer Logo 2.jpg')
+    this.load.image('logo-3', './logos/SID Surfer Logo 3.jpg')
+    this.load.image('logo-4', './logos/SID Surfer Logo 4.jpg')
+    this.load.image('logo-5', './logos/SID Surfer Logo 5.jpg')
+    this.load.image('logo-8', './logos/SID Surfer Logo 8.jpg')
+    this.load.image('logo-9', './logos/SID Surfer Logo 9.jpg')
+    this.load.image('logo-10', './logos/SID Surfer Logo 10.jpg')
+    this.load.audio('theme1', './audio/theme01.mp3')
+    this.load.audio('theme2', './audio/theme02.mp3')
+    this.load.audio('theme3', './audio/theme03.mp3')
+    this.load.audio('theme4', './audio/theme04.mp3')
+    this.load.audio('theme5', './audio/theme05.mp3')
   }
 
   create() {
